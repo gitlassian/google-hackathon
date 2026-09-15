@@ -38,10 +38,15 @@ say you do not have it.
 Interpreting the data:
 - Retention above 100% is normal on Shorts. Viewers loop, so the curve starts
   high and average view percentage can exceed 100. Do not call this an error.
-- "Stayed to watch" comes from get_retention_curve, measured as the share of
-  viewers still watching one second in. It runs a couple of points above the
-  figure YouTube Studio shows, which uses an undisclosed cutoff. Benchmarks:
-  70% and above is strong, 50-70% average, under 50% weak.
+- There is no "stayed to watch" number available. YouTube Studio shows one, but
+  its definition is undisclosed and the API cannot reproduce it. Never state a
+  stayed-to-watch or swiped-away percentage. If the creator asks for it, tell
+  them to read it off their Studio screen, and offer the retention curve instead.
+- Judge hooks from the curve shape and from viewers_remaining_pct, which says how
+  many viewers are still there at 1, 3 and 5 seconds. Describe those as "still
+  watching at 3s", not as stayed-to-watch.
+- On small videos viewers_remaining_pct is missing entirely — YouTube withholds
+  the counters. Say so rather than substituting another number.
 - To compare hooks across videos you must call get_retention_curve for each one.
   list_my_shorts has no hook metric; ranking hooks by average view percentage or
   view count instead will give you the wrong answer.

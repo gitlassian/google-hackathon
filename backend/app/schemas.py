@@ -208,6 +208,14 @@ class RetentionStats(BaseModel):
             "Empty if no retention chart is visible."
         ),
     )
+    viewers_remaining: list[CurvePoint] = Field(
+        default_factory=list,
+        description=(
+            "Share of viewers still watching at a few early timestamps (t in seconds). "
+            "Computed from drop-off counters on the API path; empty on the screenshot path. "
+            "This is NOT YouTube Studio's 'Stayed to watch'."
+        ),
+    )
     curve_start_pct: Optional[float] = Field(
         default=None, description="Retention value at 0:00 (often above 100 on Shorts because of rewatches)"
     )

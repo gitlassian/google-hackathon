@@ -78,37 +78,34 @@ def test_copies_the_performance_metrics_over():
     assert stats.watch_time_hours == 2.0
 
 
-def test_derives_stayed_and_swiped_away_from_real_dropoff():
-    # 30 s video, so 1.0 s is ratio 0.033 and only the first segment counts:
-    # 100 of 1000 viewers gone.
+def test_never_claims_a_stayed_to_watch_figure():
+    # Two derivations were tried and both were wrong against Studio:
+    # engagedViews/views gave 33.3% vs 74.4%, and remaining-at-1s gave
+    # 94.2% vs 48.1%. The API cannot reproduce Studio's definition.
     stats = build()
-
-    assert stats.stayed_to_watch_pct == 90.0
-    assert stats.swiped_away_pct == 10.0
-
-
-def test_says_in_the_notes_where_stayed_to_watch_was_measured():
-    stats = build()
-
-    assert "still watching" in stats.notes
-    assert "Studio" in stats.notes
-
-
-def test_ignores_engaged_views_entirely_for_stayed_to_watch():
-    # engagedViews/views equals 100% on pre-2025 data and is noise on recent
-    # data. On i-8TOGtJxTc it gave 33.3% where Studio shows 74.4%.
-    stats = build(engagement={"views": 200, "engagedViews": 100})
-
-    assert stats.stayed_to_watch_pct == 90.0
-
-
-def test_has_no_stayed_to_watch_without_the_dropoff_counters():
-    rows = [{"elapsedVideoTimeRatio": 0.01, "audienceWatchRatio": 1.3}]
-
-    stats = build(rows=rows)
 
     assert stats.stayed_to_watch_pct is None
     assert stats.swiped_away_pct is None
+
+
+def test_says_in_the_notes_why_there_is_no_stayed_to_watch():
+    assert "stayed to watch" in build().notes.lower()
+
+
+def test_reports_how_many_viewers_are_left_early_on():
+    # 30 s video: 1.0 s is ratio 0.033, so only the first segment counts and
+    # 100 of 1000 viewers are gone.
+    stats = build()
+
+    remaining = {point.t: point.pct for point in stats.viewers_remaining}
+    assert remaining[1.0] == 90.0
+    assert set(remaining) == {1.0, 3.0, 5.0}
+
+
+def test_has_no_early_numbers_without_the_dropoff_counters():
+    rows = [{"elapsedVideoTimeRatio": 0.01, "audienceWatchRatio": 1.3}]
+
+    assert build(rows=rows).viewers_remaining == []
 
 
 def test_leaves_unique_viewers_null_because_v2_has_no_such_metric():
@@ -121,8 +118,8 @@ def test_works_without_any_performance_metrics():
     assert stats.avg_view_duration_sec is None
     assert stats.engaged_views is None
     assert len(stats.retention_curve) == 4
-    # Stayed-to-watch comes from the retention rows, so it survives.
-    assert stats.stayed_to_watch_pct == 90.0
+    # Early drop-off comes from the retention rows, so it survives.
+    assert stats.viewers_remaining[0].pct == 90.0
 
 
 def test_refuses_to_place_a_curve_without_a_duration():

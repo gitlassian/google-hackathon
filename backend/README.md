@@ -224,18 +224,27 @@ trust this list over <https://developers.google.com/youtube/analytics/dimensions
   silently truncates. On the test channel a two-year window reported 254 views against 9150
   lifetime, and returned a retention curve for **5 of 13** videos instead of all 13 — the other
   eight simply had their watch time before the window. Pass `start`/`end` to narrow deliberately.
-- **Never compute stayed-to-watch from `engagedViews / views`.** It is wrong twice over:
-  `engagedViews` equals `views` exactly before YouTube's 2025 change to Shorts view counting
-  (a flat 100%), and on an older video the post-2025 window is a handful of views, so the ratio
-  is noise. On `i-8TOGtJxTc` it produced **33.3%** where Studio shows **74.4%** — which inverted
-  the verdict from "strong hook" to "worst hook on the channel". `stayed_to_watch_from_dropoff`
-  uses the real per-segment counters instead and lands at 77.3% on that video.
-- **`startedWatching` / `stoppedWatching` work, and are the only honest hook metric.** They
-  return HTTP 500 if requested *alone*, so pair them with `audienceWatchRatio`. An earlier note
-  here said they return no rows — that was the rolling-window bug below, not a missing metric.
-- **Studio's "Stayed to watch" cannot be reproduced exactly.** Its cutoff is undisclosed; our
-  one-second measurement runs ~3 points high (77.3% vs 74.4%). Close enough to share a
-  benchmark band, not close enough to present as YouTube's own number — `notes` says so.
+- **Studio's "Stayed to watch" cannot be reproduced from the API. Do not try again.** Two
+  derivations were built and both were wrong, each after looking convincing on a single video:
+
+  | Derivation | `i-8TOGtJxTc` (Studio 74.4%) | `seIjJBsdCRc` (Studio 48.1%) |
+  |---|---|---|
+  | `engagedViews / views` | 33.3% | — |
+  | viewers remaining at 1.0s | 77.3% ✓ | **94.2%** ✗ |
+
+  It is not a fixed time cutoff: Studio's swipe figure is reached at 1.5s on one of those videos
+  and 6.0s on the other. `stayed_to_watch_pct` and `swiped_away_pct` are therefore **always null**
+  on the API path. Studio's number is real and useful — read it off a screenshot, which is what
+  the Gemini extractor is for.
+- **Use `viewers_remaining` instead.** Share of viewers still there at 1, 3 and 5 seconds, from
+  `startedWatching` / `stoppedWatching`. A plain fact, correctly labelled, never presented as
+  Studio's metric. Absent on low-view videos, where YouTube withholds the counters.
+- **`startedWatching` / `stoppedWatching` return HTTP 500 if requested alone** — pair them with
+  `audienceWatchRatio`. They are also suppressed below some view threshold, and asking for them
+  takes the *whole* result down: a 57-view video returns 100 rows without them and 0 rows with.
+  `AnalyticsApiClient.retention` falls back to `SAFE_RETENTION_METRICS` for exactly this.
+- **The curve itself is exact** and matched Studio's chart on both videos checked (42.47 vs 42%,
+  68.02 vs the plotted endpoint). Trust the curve; distrust any summary number derived from it.
 - **Shorts loop, so watch-time metrics exceed 100%.** A `PT57S` Short reports
   `averageViewPercentage` 159% and `audienceWatchRatio` 2.29 at the first sample over a narrow
   window. Nothing downstream may treat that as an error.

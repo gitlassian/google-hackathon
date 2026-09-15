@@ -58,9 +58,11 @@ TOOLS: list[dict[str, Any]] = [
         "name": "get_retention_curve",
         "description": (
             "The audience retention curve for one video, thinned to about a dozen "
-            "points, plus the steepest drops, the duration, and stayed_to_watch_pct "
-            "measured from real drop-off counters. This is the only reliable way to "
-            "judge a hook. Values above 100% are normal on Shorts because viewers loop."
+            "points, plus the steepest drops, the duration, and viewers_remaining_pct "
+            "at 1/3/5 seconds. Judge hooks from these. stayed_to_watch_pct is always "
+            "null here — YouTube Studio's version of that number cannot be reproduced "
+            "from the API, so do not claim one. Values above 100% are normal on Shorts "
+            "because viewers loop."
         ),
         "parameters": {"type": "object", "properties": _VIDEO_ID, "required": ["video_id"]},
     },
@@ -146,7 +148,10 @@ def _get_retention_curve(service, video_id: str) -> dict[str, Any]:
     return {
         "video_id": video_id,
         "duration_sec": stats.video_duration_sec,
-        "stayed_to_watch_pct": stats.stayed_to_watch_pct,
+        "viewers_remaining_pct": {
+            f"{point.t:g}s": point.pct for point in stats.viewers_remaining
+        },
+        "stayed_to_watch_pct": None,
         "curve_start_pct": stats.curve_start_pct,
         "curve_end_pct": stats.curve_end_pct,
         "curve": downsample_curve(stats.retention_curve),
