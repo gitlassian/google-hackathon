@@ -140,28 +140,7 @@ class YouTubeService:
                 for video in self.data.get_videos([row["video"] for row in rows])
             }
 
-        # One extra call for the whole list, not one per video. Deliberately not
-        # capped at `limit`: the top N by lifetime views and the top N since 2025
-        # are different sets, and a video missing from this lookup must report no
-        # ratio rather than silently fall back to the misleading lifetime one.
-        scoped = not start or start < ENGAGED_VIEWS_MEANINGFUL_FROM
-        engagement: dict[str, dict[str, Any]] = {}
-        if rows and scoped:
-            engagement = {
-                row["video"]: row
-                for row in self.analytics.top_videos(
-                    ENGAGED_VIEWS_MEANINGFUL_FROM, end, content_type, ENGAGEMENT_LOOKUP_LIMIT
-                )
-            }
-
-        return [
-            _performance(
-                row,
-                metadata.get(row["video"]),
-                engagement.get(row["video"], {}) if scoped else row,
-            )
-            for row in rows
-        ]
+        return [_performance(row, metadata.get(row["video"])) for row in rows]
 
     def list_my_shorts(self, **kwargs: Any) -> list[VideoPerformance]:
         return self.list_my_videos(shorts_only=True, **kwargs)
@@ -247,15 +226,13 @@ class YouTubeService:
         return self.analytics.video_performance(video_id, scoped_start, end)
 
 
-def _performance(
-    row: dict[str, Any],
-    video: VideoMetadata | None,
-    ratio_source: dict[str, Any],
-) -> VideoPerformance:
-    """`ratio_source` supplies views/engagedViews for the stayed-to-watch ratio.
+def _performance(row: dict[str, Any], video: VideoMetadata | None) -> VideoPerformance:
+    """Per-video metrics, without a stayed-to-watch figure.
 
-    It is a different row from `row` whenever the window reaches before 2025, and
-    an empty dict when the video has no data in the meaningful window at all.
+    Measuring stayed-to-watch honestly needs the per-segment drop-off counters,
+    which cost one retention call per video — too much for a list. Rank by
+    average_view_percentage here, and call get_retention_stats for a real hook
+    number on a specific video.
     """
     return VideoPerformance(
         video_id=row["video"],
@@ -266,9 +243,7 @@ def _performance(
         estimated_minutes_watched=row.get("estimatedMinutesWatched"),
         average_view_duration_sec=row.get("averageViewDuration"),
         average_view_percentage=row.get("averageViewPercentage"),
-        stayed_to_watch_pct=derive_stayed_to_watch_pct(
-            ratio_source.get("views"), ratio_source.get("engagedViews")
-        ),
+        stayed_to_watch_pct=None,
         likes=row.get("likes"),
         comments=row.get("comments"),
         shares=row.get("shares"),

@@ -89,10 +89,11 @@ against a live channel:
 | A | `audienceWatchRatio` only | 100 rows |
 | B | `+ relativeRetentionPerformance` | 100 rows |
 | C | `+ audienceType==ORGANIC` | 100 rows |
-| D | `startedWatching` / `stoppedWatching` / `totalSegmentImpressions` | **empty — not available** |
+| D | `startedWatching` / `stoppedWatching` / `totalSegmentImpressions` | 100 rows |
 
-Variant D being empty is why "stayed to watch" is derived from `engagedViews / views` rather
-than from segment counters.
+Variant D looked empty on first run. That was the rolling-window bug, not a missing metric —
+over full history it returns all 100 rows, and those counters are what `stayed_to_watch_pct` is
+computed from.
 
 ## Asking Gemini about the channel
 
@@ -223,12 +224,18 @@ trust this list over <https://developers.google.com/youtube/analytics/dimensions
   silently truncates. On the test channel a two-year window reported 254 views against 9150
   lifetime, and returned a retention curve for **5 of 13** videos instead of all 13 — the other
   eight simply had their watch time before the window. Pass `start`/`end` to narrow deliberately.
-- **`engagedViews` is meaningless before 2025.** YouTube changed Shorts view counting in early
-  2025; prior to that `engagedViews` equals `views` exactly on every video checked, so
-  `engagedViews / views` is a flat 100%. `stayed_to_watch_pct` is therefore measured from
-  `ENGAGED_VIEWS_MEANINGFUL_FROM` (2025-01-01) regardless of the reported window, and the
-  derivation window is named in `notes`. Ignoring this reports ~99% stayed-to-watch on videos
-  whose real figure is ~40%.
+- **Never compute stayed-to-watch from `engagedViews / views`.** It is wrong twice over:
+  `engagedViews` equals `views` exactly before YouTube's 2025 change to Shorts view counting
+  (a flat 100%), and on an older video the post-2025 window is a handful of views, so the ratio
+  is noise. On `i-8TOGtJxTc` it produced **33.3%** where Studio shows **74.4%** — which inverted
+  the verdict from "strong hook" to "worst hook on the channel". `stayed_to_watch_from_dropoff`
+  uses the real per-segment counters instead and lands at 77.3% on that video.
+- **`startedWatching` / `stoppedWatching` work, and are the only honest hook metric.** They
+  return HTTP 500 if requested *alone*, so pair them with `audienceWatchRatio`. An earlier note
+  here said they return no rows — that was the rolling-window bug below, not a missing metric.
+- **Studio's "Stayed to watch" cannot be reproduced exactly.** Its cutoff is undisclosed; our
+  one-second measurement runs ~3 points high (77.3% vs 74.4%). Close enough to share a
+  benchmark band, not close enough to present as YouTube's own number — `notes` says so.
 - **Shorts loop, so watch-time metrics exceed 100%.** A `PT57S` Short reports
   `averageViewPercentage` 159% and `audienceWatchRatio` 2.29 at the first sample over a narrow
   window. Nothing downstream may treat that as an error.

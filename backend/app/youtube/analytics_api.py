@@ -22,9 +22,12 @@ VIDEO_METRICS = (
     "averageViewPercentage,likes,comments,shares,subscribersGained"
 )
 
-# startedWatching / stoppedWatching / totalSegmentImpressions return no rows, so
-# they are left out entirely.
-RETENTION_METRICS = "audienceWatchRatio,relativeRetentionPerformance"
+# startedWatching/stoppedWatching give the real per-segment drop-off, which is
+# what stayed-to-watch is computed from. They 500 if requested on their own, and
+# earlier looked unavailable only because the old rolling window had no data.
+RETENTION_METRICS = (
+    "audienceWatchRatio,relativeRetentionPerformance,startedWatching,stoppedWatching"
+)
 
 # Default to the whole history. A rolling lookback silently truncates: on the
 # test channel a two-year window reported 254 views against 9150 lifetime, and

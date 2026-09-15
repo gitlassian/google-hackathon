@@ -14,15 +14,46 @@ SHORTS = "shorts"
 VIDEO_ON_DEMAND = "video_on_demand"
 UNSPECIFIED = "unspecified"
 
+# How long a Shorts viewer takes to decide to swipe. Studio's "Stayed to watch"
+# measures roughly this window, though it does not say exactly where it cuts.
+HOOK_DECISION_SEC = 1.0
+
 STAYED_TO_WATCH_NOTE = (
-    "stayed_to_watch_pct is derived as engagedViews / views over "
-    "{window}; YouTube Studio's own figure is not exposed by the Analytics API."
+    "stayed_to_watch_pct is the share of viewers still watching at {at}s, computed "
+    "from startedWatching/stoppedWatching. YouTube Studio's own 'Stayed to watch' "
+    "uses an undisclosed cutoff and will differ by a few points."
 )
 
-# YouTube changed how it counts a Shorts view in early 2025. Before that,
-# engagedViews was identical to views on every video we checked, so the ratio is
-# a flat 100% and means nothing. Only measure engagement from here onward.
+# Do NOT use engagedViews/views for this. It is identical to views before 2025
+# (a flat 100%), and on an older video the recent window is a handful of views,
+# so the ratio is noise. On i-8TOGtJxTc it gave 33.3% against Studio's 74.4%.
 ENGAGED_VIEWS_MEANINGFUL_FROM = "2025-01-01"
+
+
+def stayed_to_watch_from_dropoff(
+    rows: list[dict[str, Any]],
+    duration_sec: float | None,
+    at_seconds: float = HOOK_DECISION_SEC,
+) -> float | None:
+    """Percentage of viewers still watching `at_seconds` into the video.
+
+    Uses the real per-segment counters: everyone who started at the first
+    segment, minus everyone who stopped in the segments up to that point.
+    """
+    if not rows or not duration_sec or duration_sec <= 0:
+        return None
+    started = rows[0].get("startedWatching")
+    if not started:
+        return None
+
+    cutoff = at_seconds / duration_sec
+    stopped = sum(
+        row.get("stoppedWatching") or 0
+        for row in rows
+        if row.get("elapsedVideoTimeRatio") is not None
+        and row["elapsedVideoTimeRatio"] <= cutoff
+    )
+    return round(max(0.0, (1 - stopped / started) * 100), 1)
 
 
 def rows_as_dicts(response: dict[str, Any]) -> list[dict[str, Any]]:
@@ -103,12 +134,11 @@ def retention_stats_from_analytics(
     just for the stayed-to-watch ratio. See ENGAGED_VIEWS_MEANINGFUL_FROM.
     """
     metrics = performance or {}
-    engagement_metrics = engagement or metrics
     minutes_watched = metrics.get("estimatedMinutesWatched")
 
-    stayed = derive_stayed_to_watch_pct(
-        engagement_metrics.get("views"), engagement_metrics.get("engagedViews")
-    )
+    # From the real drop-off counters. engagement is accepted for compatibility
+    # but deliberately unused: engagedViews/views does not measure this.
+    stayed = stayed_to_watch_from_dropoff(rows, duration_sec)
     curve = curve_from_retention_rows(rows, duration_sec)
 
     stats = RetentionStats(
@@ -124,13 +154,7 @@ def retention_stats_from_analytics(
         # Nothing was read off a chart, so there is nothing to be unsure about.
         reading_confidence=1.0,
         notes=(
-            STAYED_TO_WATCH_NOTE.format(
-                window=f"{ENGAGED_VIEWS_MEANINGFUL_FROM} onward"
-                if engagement
-                else "the reported window"
-            )
-            if stayed is not None
-            else ""
+            STAYED_TO_WATCH_NOTE.format(at=HOOK_DECISION_SEC) if stayed is not None else ""
         ),
     )
     return normalize_stats(stats)

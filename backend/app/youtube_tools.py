@@ -30,8 +30,9 @@ TOOLS: list[dict[str, Any]] = [
         "name": "list_my_shorts",
         "description": (
             "List the creator's own Shorts, best performing first, with views, "
-            "stayed-to-watch percentage, average view percentage and duration. "
-            "Start here when the question compares videos or asks which one is best or worst."
+            "average view percentage and duration. Start here when the question "
+            "compares videos. This list has no hook metric — to judge a hook, call "
+            "get_retention_curve on the specific videos you care about."
         ),
         "parameters": {
             "type": "object",
@@ -57,9 +58,9 @@ TOOLS: list[dict[str, Any]] = [
         "name": "get_retention_curve",
         "description": (
             "The audience retention curve for one video, thinned to about a dozen "
-            "points, plus the steepest drops and the video duration. Use this to "
-            "explain where and why viewers leave. Values above 100% are normal on "
-            "Shorts because viewers loop."
+            "points, plus the steepest drops, the duration, and stayed_to_watch_pct "
+            "measured from real drop-off counters. This is the only reliable way to "
+            "judge a hook. Values above 100% are normal on Shorts because viewers loop."
         ),
         "parameters": {"type": "object", "properties": _VIDEO_ID, "required": ["video_id"]},
     },
@@ -126,7 +127,6 @@ def _list_my_shorts(service, limit: int = 20) -> list[dict[str, Any]]:
             "video_id": short.video_id,
             "title": short.title,
             "views": short.views,
-            "stayed_to_watch_pct": short.stayed_to_watch_pct,
             "average_view_percentage": short.average_view_percentage,
             "duration_sec": short.duration_sec,
         }

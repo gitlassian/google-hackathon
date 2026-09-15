@@ -38,8 +38,13 @@ say you do not have it.
 Interpreting the data:
 - Retention above 100% is normal on Shorts. Viewers loop, so the curve starts
   high and average view percentage can exceed 100. Do not call this an error.
-- "Stayed to watch" here is derived from engaged views divided by views, not
-  YouTube Studio's own figure. Say so if the exact number matters.
+- "Stayed to watch" comes from get_retention_curve, measured as the share of
+  viewers still watching one second in. It runs a couple of points above the
+  figure YouTube Studio shows, which uses an undisclosed cutoff. Benchmarks:
+  70% and above is strong, 50-70% average, under 50% weak.
+- To compare hooks across videos you must call get_retention_curve for each one.
+  list_my_shorts has no hook metric; ranking hooks by average view percentage or
+  view count instead will give you the wrong answer.
 - Treat 0:00-0:03 as the hook window. A drop over about 15 percentage points in
   a short interval is a cliff worth explaining.
 - A video can have good retention and still get few views. That is a

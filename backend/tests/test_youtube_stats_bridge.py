@@ -6,11 +6,12 @@ from app.schemas import RetentionStats
 from app.youtube.mapping import retention_stats_from_analytics
 
 # A 30 s Short: starts above 100% from loops, cliff at the halfway mark.
+# startedWatching/stoppedWatching are the real per-segment drop-off counters.
 RETENTION_ROWS = [
-    {"elapsedVideoTimeRatio": 0.01, "audienceWatchRatio": 1.3},
-    {"elapsedVideoTimeRatio": 0.25, "audienceWatchRatio": 0.9},
-    {"elapsedVideoTimeRatio": 0.5, "audienceWatchRatio": 0.4},
-    {"elapsedVideoTimeRatio": 1.0, "audienceWatchRatio": 0.35},
+    {"elapsedVideoTimeRatio": 0.01, "audienceWatchRatio": 1.3, "startedWatching": 1000, "stoppedWatching": 100},
+    {"elapsedVideoTimeRatio": 0.25, "audienceWatchRatio": 0.9, "startedWatching": 5, "stoppedWatching": 200},
+    {"elapsedVideoTimeRatio": 0.5, "audienceWatchRatio": 0.4, "startedWatching": 2, "stoppedWatching": 150},
+    {"elapsedVideoTimeRatio": 1.0, "audienceWatchRatio": 0.35, "startedWatching": 0, "stoppedWatching": 50},
 ]
 
 PERFORMANCE = {
@@ -77,34 +78,37 @@ def test_copies_the_performance_metrics_over():
     assert stats.watch_time_hours == 2.0
 
 
-def test_derives_stayed_and_swiped_away_from_engaged_views():
+def test_derives_stayed_and_swiped_away_from_real_dropoff():
+    # 30 s video, so 1.0 s is ratio 0.033 and only the first segment counts:
+    # 100 of 1000 viewers gone.
     stats = build()
 
-    assert stats.stayed_to_watch_pct == 16.5
-    assert stats.swiped_away_pct == 83.5
+    assert stats.stayed_to_watch_pct == 90.0
+    assert stats.swiped_away_pct == 10.0
 
 
-def test_says_in_the_notes_that_stayed_to_watch_is_our_arithmetic():
+def test_says_in_the_notes_where_stayed_to_watch_was_measured():
     stats = build()
 
-    assert "engagedViews" in stats.notes
+    assert "still watching" in stats.notes
+    assert "Studio" in stats.notes
 
 
-def test_prefers_a_separate_engagement_window_for_stayed_to_watch():
-    # Before 2025 YouTube counted a Shorts view the same way it counted an
-    # engaged view, so engagedViews/views over all history is always 100% and
-    # says nothing. The ratio has to come from a window where it means something.
+def test_ignores_engaged_views_entirely_for_stayed_to_watch():
+    # engagedViews/views equals 100% on pre-2025 data and is noise on recent
+    # data. On i-8TOGtJxTc it gave 33.3% where Studio shows 74.4%.
     stats = build(engagement={"views": 200, "engagedViews": 100})
 
-    assert stats.stayed_to_watch_pct == 50.0
-    assert stats.swiped_away_pct == 50.0
-    # Everything else still comes from the full-history metrics.
-    assert stats.engaged_views == 165
-    assert stats.watch_time_hours == 2.0
+    assert stats.stayed_to_watch_pct == 90.0
 
 
-def test_falls_back_to_the_main_metrics_when_no_engagement_window_is_given():
-    assert build(engagement=None).stayed_to_watch_pct == 16.5
+def test_has_no_stayed_to_watch_without_the_dropoff_counters():
+    rows = [{"elapsedVideoTimeRatio": 0.01, "audienceWatchRatio": 1.3}]
+
+    stats = build(rows=rows)
+
+    assert stats.stayed_to_watch_pct is None
+    assert stats.swiped_away_pct is None
 
 
 def test_leaves_unique_viewers_null_because_v2_has_no_such_metric():
@@ -114,10 +118,11 @@ def test_leaves_unique_viewers_null_because_v2_has_no_such_metric():
 def test_works_without_any_performance_metrics():
     stats = build(performance=None)
 
-    assert stats.stayed_to_watch_pct is None
-    assert stats.swiped_away_pct is None
     assert stats.avg_view_duration_sec is None
+    assert stats.engaged_views is None
     assert len(stats.retention_curve) == 4
+    # Stayed-to-watch comes from the retention rows, so it survives.
+    assert stats.stayed_to_watch_pct == 90.0
 
 
 def test_refuses_to_place_a_curve_without_a_duration():
