@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-
-const KEY = "coach.geminiApiKey";
+import { GEMINI_KEY_STORAGE } from "@/lib/constants";
 
 export function SettingsPanel() {
   const [apiKey, setApiKey] = useState(() =>
-    typeof window === "undefined" ? "" : (localStorage.getItem(KEY) ?? ""),
+    typeof window === "undefined"
+      ? ""
+      : (localStorage.getItem(GEMINI_KEY_STORAGE) ?? ""),
   );
   const [saved, setSaved] = useState(false);
 
@@ -35,8 +36,12 @@ export function SettingsPanel() {
         Gemini API key
       </h3>
       <p className="mt-2 text-[15px] leading-7 text-[#444]">
-        Stored in localStorage on this machine. Not wired to the backend yet —
-        the UI currently plays a mock report.
+        Used by the Next.js API routes. Prefer{" "}
+        <code className="rounded bg-[#f4f4f5] px-1 py-0.5 text-[13px]">
+          GEMINI_API_KEY
+        </code>{" "}
+        in <code className="rounded bg-[#f4f4f5] px-1 py-0.5 text-[13px]">frontend/.env.local</code>
+        . A key saved here is sent as a request header for local demos.
       </p>
       <input
         type="password"
@@ -52,7 +57,7 @@ export function SettingsPanel() {
         type="button"
         className="mt-3 h-8 rounded-lg bg-accent px-3 text-[13px] font-medium text-white hover:bg-[#1b6ff2]"
         onClick={() => {
-          localStorage.setItem(KEY, apiKey.trim());
+          localStorage.setItem(GEMINI_KEY_STORAGE, apiKey.trim());
           setSaved(true);
         }}
       >

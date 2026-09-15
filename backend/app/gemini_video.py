@@ -2,11 +2,22 @@ import base64
 import time
 from google import genai
 
-from .config import GEMINI_API_KEY, GEMINI_MODEL
+from .config import GEMINI_MODEL, require_gemini_key
 from .schemas import ShortReport ,YouTubeAnswer
 
+_client_cache: genai.Client | None = None
 
-_client = genai.Client(api_key=GEMINI_API_KEY)
+
+def _client() -> genai.Client:
+    """Built on first use so the app boots with only YouTube credentials.
+
+    genai.Client() raises immediately on an empty key, which used to take the
+    whole app down at import time.
+    """
+    global _client_cache
+    if _client_cache is None:
+        _client_cache = genai.Client(api_key=require_gemini_key())
+    return _client_cache
 
 SHORT_ANALYSIS_SYSTEM_PROMPT = """
 You are an expert YouTube Shorts retention coach.
@@ -183,7 +194,7 @@ def ask_youtube_video(
     url: str,
     question: str,
 ) -> tuple[YouTubeAnswer, str]:
-    interaction = _client.interactions.create(
+    interaction = _client().interactions.create(
         model=GEMINI_MODEL,
         system_instruction=YOUTUBE_QA_SYSTEM_PROMPT,
         input=[
@@ -213,7 +224,7 @@ def ask_follow_up(
     interaction_id: str,
     question: str,
 ) -> tuple[str, str]:
-    interaction = _client.interactions.create(
+    interaction = _client().interactions.create(
         model=GEMINI_MODEL,
         input=question,
         previous_interaction_id=interaction_id,
@@ -231,7 +242,7 @@ def analyze_short(
         screenshot_bytes
     ).decode("utf-8")
 
-    interaction = _client.interactions.create(
+    interaction = _client().interactions.create(
         model=GEMINI_MODEL,
         system_instruction=SHORT_ANALYSIS_SYSTEM_PROMPT,
         input=[
