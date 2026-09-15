@@ -7,22 +7,13 @@ from pathlib import Path
 from google import genai
 from google.genai import types
 
-from .config import GEMINI_MODEL, require_gemini_key
-from .retention import normalize_stats
+from .config import GEMINI_API_KEY, GEMINI_MODEL
 from .schemas import RetentionStats
 
 # The SDK logs an "automatic function calling" warning on every call we make; not relevant here.
 logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 
-_client_cache: genai.Client | None = None
-
-
-def _client() -> genai.Client:
-    """Built on first use so the app boots with only YouTube credentials."""
-    global _client_cache
-    if _client_cache is None:
-        _client_cache = genai.Client(api_key=require_gemini_key())
-    return _client_cache
+_client = genai.Client(api_key=GEMINI_API_KEY)
 
 EXTRACTION_PROMPT = """\
 You are reading a screenshot from YouTube Studio's Analytics > Engagement tab for a YouTube Short.
@@ -65,7 +56,7 @@ def _load_image(path: str | Path) -> tuple[bytes, str]:
 
 def extract_retention_stats(image_bytes: bytes, mime_type: str = "image/png") -> RetentionStats:
     """Send one screenshot to Gemini and get structured retention statistics back."""
-    response = _client().models.generate_content(
+    response = _client.models.generate_content(
         model=GEMINI_MODEL,
         contents=[
             types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
@@ -81,9 +72,20 @@ def extract_retention_stats(image_bytes: bytes, mime_type: str = "image/png") ->
     if not isinstance(parsed, RetentionStats):
         # Fallback: SDK returned raw text (older SDKs) — validate it ourselves.
         parsed = RetentionStats.model_validate_json(response.text)
-    # `source` is in the schema, so the model may have filled it in; it doesn't get a say.
-    parsed.source = "screenshot"
-    return normalize_stats(parsed)
+    return _normalize(parsed)
+
+
+def _normalize(stats: RetentionStats) -> RetentionStats:
+    """Tidy up what the model returned: sorted curve, drops ordered by size."""
+    stats.retention_curve.sort(key=lambda pt: pt.t)
+    if stats.retention_curve:
+        stats.curve_start_pct = stats.retention_curve[0].pct
+        stats.curve_end_pct = stats.retention_curve[-1].pct
+    for d in stats.biggest_drops:
+        d.drop_pct_points = round(d.from_pct - d.to_pct, 1)
+    stats.biggest_drops.sort(key=lambda d: d.drop_pct_points, reverse=True)
+    stats.biggest_drops = stats.biggest_drops[:5]
+    return stats
 
 
 def extract_retention_stats_from_file(path: str | Path) -> RetentionStats:

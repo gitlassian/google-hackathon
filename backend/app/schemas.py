@@ -3,11 +3,6 @@ from typing import Literal, Optional
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator
 
 
-class CurvePoint(BaseModel):
-    t: float = Field(description="Seconds from the start of the video")
-    pct: float = Field(description="Retention percentage at that second (can exceed 100 on Shorts)")
-
-
 class FrontendModel(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -150,32 +145,23 @@ class FollowUpRequest(BaseModel):
     interaction_id: str
     question: str = Field(min_length=1, max_length=2000)
 
+class CurvePoint(BaseModel):
+    t: float = Field(description="Seconds from the start of the video")
+    pct: float = Field(description="Retention percentage at that second (can exceed 100 on Shorts)")
+
 
 class RetentionStats(BaseModel):
-    """Retention statistics for one video, from either data source.
+    """Everything Gemini can read off a YouTube Studio Engagement screenshot.
 
-    Produced by reading a YouTube Studio screenshot with Gemini, or by querying the
-    YouTube Analytics API for a channel the user owns. Consumers check `source` to
-    know whether they are looking at exact numbers or a model's reading of a chart.
-
-    Any field the source does not provide is null.
+    Any field that is not visible in the screenshot is null.
     """
 
-    source: Literal["analytics_api", "screenshot"] = Field(
-        default="screenshot",
+    screenshot_type: Literal["retention", "engagement_overview", "mixed", "other"] = Field(
         description=(
-            "Where these numbers came from. Set by the backend after the fact — "
-            "do not infer it from the image."
-        ),
-    )
-    screenshot_type: Optional[Literal["retention", "engagement_overview", "mixed", "other"]] = Field(
-        default=None,
-        description=(
-            "Only meaningful for the screenshot source. "
             "'retention' = Audience retention panel with a curve; "
             "'engagement_overview' = top Engagement tab with views/watch time and the "
             "'How viewers engaged' bar; 'mixed' = both visible; 'other' = neither."
-        ),
+        )
     )
     stayed_to_watch_pct: Optional[float] = Field(
         default=None, description="'Stayed to watch' percentage, e.g. 16.5"
