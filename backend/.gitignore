@@ -9,6 +9,7 @@ __pycache__/
 .env
 client_secret*.json
 *token*.json
+.youtube-token.json
 
 # Generated output
 out/

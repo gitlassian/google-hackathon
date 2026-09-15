@@ -1,11 +1,154 @@
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator
 
 
 class CurvePoint(BaseModel):
     t: float = Field(description="Seconds from the start of the video")
     pct: float = Field(description="Retention percentage at that second (can exceed 100 on Shorts)")
+
+
+class FrontendModel(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class ExtractedAnalytics(FrontendModel):
+    duration_sec: float = Field(
+        alias="durationSec",
+        ge=0,
+        description="Video duration in seconds read from the screenshot/video.",
+    )
+    stayed_to_watch_pct: float = Field(
+        alias="stayedToWatchPct",
+        ge=0,
+        le=100,
+        description="'Stayed to watch' percentage from YouTube Studio.",
+    )
+    avg_view_duration_sec: float = Field(
+        alias="avgViewDurationSec",
+        ge=0,
+        description="Average view duration converted to seconds.",
+    )
+    curve: list[CurvePoint] = Field(
+        description="Retention curve sampled from the screenshot."
+    )
+
+
+class HookAnalysis(FrontendModel):
+    rating: Literal["strong", "ok", "weak"]
+    first_three_seconds: str = Field(
+        alias="firstThreeSeconds",
+        description=(
+            "Concrete description of what is visible and audible "
+            "during 00:00-00:03."
+        ),
+    )
+    why_it_works_or_fails: str = Field(
+        alias="whyItWorksOrFails",
+        description="Evidence-based explanation of hook performance.",
+    )
+    rewrite: str = Field(
+        description=(
+            "A concrete better opening for the creator's next Short "
+            "on the same topic."
+        ),
+    )
+
+
+class RetentionDip(FrontendModel):
+    t: str = Field(
+        description="Timestamp in MM:SS format."
+    )
+    drop_pct: float = Field(
+        alias="dropPct",
+        ge=0,
+        description="Approximate retention drop in percentage points.",
+    )
+    on_screen: str = Field(
+        alias="onScreen",
+        description="What is actually visible/audible around the dip.",
+    )
+    cause: str = Field(
+        description="Most likely reason this moment loses viewers.",
+    )
+    fix: str = Field(
+        description="Actionable lesson for the creator's next video.",
+    )
+
+
+class StayedToWatchAnalysis(FrontendModel):
+    rating: Literal["strong", "ok", "weak"]
+    explanation: str
+
+
+class ShortReport(FrontendModel):
+    score: int = Field(
+        ge=0,
+        le=100,
+        description="Overall Short retention/coaching score.",
+    )
+    verdict: str = Field(
+        description="One concise sentence summarizing the main problem or strength."
+    )
+    extracted: ExtractedAnalytics
+    hook: HookAnalysis
+    dips: list[RetentionDip]
+    stayed_to_watch: StayedToWatchAnalysis = Field(
+        alias="stayedToWatch"
+    )
+    next_video_rules: list[str] = Field(
+        alias="nextVideoRules",
+        min_length=3,
+        max_length=5,
+        description="3-5 concrete rules for the creator's next Short.",
+    )
+    distribution_note: Optional[str] = Field(
+        default=None,
+        alias="distributionNote",
+        description=(
+            "Only use when the supplied evidence supports a distribution-related observation."
+        ),
+    )
+
+
+class YouTubeQuestionRequest(BaseModel):
+    url: AnyHttpUrl
+    question: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("url")
+    @classmethod
+    def validate_youtube_url(cls, url: AnyHttpUrl):
+        allowed_hosts = {
+            "youtube.com",
+            "www.youtube.com",
+            "m.youtube.com",
+            "youtu.be",
+        }
+
+        if url.host not in allowed_hosts:
+            raise ValueError("URL must point to YouTube")
+
+        return url
+
+
+class TimestampEvidence(BaseModel):
+    timestamp: str
+    description: str
+
+
+class YouTubeAnswer(BaseModel):
+    answer: str
+    evidence: list[TimestampEvidence] = Field(default_factory=list)
+
+
+class YouTubeQuestionResponse(BaseModel):
+    interaction_id: str
+    result: YouTubeAnswer
+
+
+class FollowUpRequest(BaseModel):
+    interaction_id: str
+    question: str = Field(min_length=1, max_length=2000)
 
 
 class RetentionStats(BaseModel):

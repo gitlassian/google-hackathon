@@ -2,8 +2,8 @@ import type { Analysis, Report } from "./types";
 
 export const LOADING_STEPS = [
   "Uploading video…",
-  "Watching the whole Short…",
   "Reading retention chart…",
+  "Watching the whole Short…",
   "Writing report…",
 ];
 
@@ -132,6 +132,9 @@ export const INITIAL_ANALYSES: Analysis[] = [
     screenshotPreview: null,
     videoPreview: null,
     report: STREET_FOOD_REPORT,
+    stats: null,
+    interactionId: null,
+    error: null,
     messages: [],
     loadingStep: 0,
   },
@@ -145,6 +148,9 @@ export const INITIAL_ANALYSES: Analysis[] = [
     screenshotPreview: null,
     videoPreview: null,
     report: GYM_REPORT,
+    stats: null,
+    interactionId: null,
+    error: null,
     messages: [],
     loadingStep: 0,
   },
@@ -161,6 +167,9 @@ export function emptyAnalysis(id: string): Analysis {
     screenshotPreview: null,
     videoPreview: null,
     report: null,
+    stats: null,
+    interactionId: null,
+    error: null,
     messages: [],
     loadingStep: 0,
   };

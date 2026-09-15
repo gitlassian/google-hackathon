@@ -13,6 +13,7 @@ type Props = {
   onVideo: (file: File) => void;
   onScreenshot: (file: File) => void;
   onSample: () => void;
+  error?: string | null;
 };
 
 export function EmptyState({
@@ -24,6 +25,7 @@ export function EmptyState({
   onVideo,
   onScreenshot,
   onSample,
+  error,
 }: Props) {
   return (
     <article className="mx-auto w-full max-w-[720px] px-6 pt-10 pb-16">
@@ -34,6 +36,11 @@ export function EmptyState({
         Drop a Short and a YouTube Studio retention screenshot. Coach watches
         the video, reads the curve, and tells you what to change next time.
       </p>
+      {error && (
+        <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[14px] text-red-700">
+          {error}
+        </p>
+      )}
 
       <div className="mt-8 grid gap-3 md:grid-cols-2">
         <DropZone
