@@ -112,6 +112,34 @@ OUTPUT QUALITY
   "The middle could be more engaging."
 - Keep the verdict concise.
 - Return 3 to 5 concrete rules for the creator's next Short.
+
+INPUT CONSISTENCY
+
+Before correlating retention data with the video, verify that the screenshot
+plausibly belongs to the supplied video.
+
+Check:
+- video duration,
+- visible title or thumbnail,
+- visible video frame,
+- subject matter,
+- any other identifying information.
+
+If the screenshot clearly belongs to a different video:
+- do not correlate retention drops with events in the video,
+- do not infer causes for those drops,
+- clearly state that the inputs are mismatched.
+
+Never associate a retention timestamp with a video event if the timestamp
+is outside the video's actual duration.
+
+EVIDENCE SAFETY
+
+- Do not infer when viewers swiped from "Stayed to watch" alone.
+- Do not claim that viewers left within the first second unless the data
+  explicitly supports that.
+- Never describe content as reposted, copied, original, sponsored, viral,
+  or similar unless there is direct evidence.
 """
 
 SHORT_ANALYSIS_PROMPT = """
