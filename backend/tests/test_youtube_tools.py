@@ -2,7 +2,7 @@ import pytest
 
 from app.schemas import CurvePoint
 from app.youtube.errors import NoDataAvailable, NotAuthenticated
-from app.youtube_tools import TOOLS, downsample_curve, run_tool
+from app.youtube_tools import TOOLS, curve_payload, run_tool
 
 
 def test_every_tool_is_declared_the_way_gemini_expects():
@@ -36,29 +36,34 @@ def curve(n: int) -> list[CurvePoint]:
     return [CurvePoint(t=float(i), pct=100.0 - i) for i in range(n)]
 
 
-def test_thins_a_hundred_point_curve_down_for_the_prompt():
-    # Sending 100 raw points burns ~2k tokens per call for shape the model can
-    # read from a dozen.
-    points = downsample_curve(curve(100), target=12)
+def test_sends_the_whole_curve_by_default():
+    # Thinning to 12 hid the hook window entirely: a 49s Short jumped from 0.49s
+    # to 4.9s, skipping all five of its steepest drops. 100 points is ~700
+    # tokens, which is affordable.
+    assert len(curve_payload(curve(100))) == 100
+
+
+def test_can_still_thin_when_asked():
+    points = curve_payload(curve(100), target=12)
 
     assert len(points) == 12
 
 
 def test_always_keeps_the_first_and_last_point():
-    points = downsample_curve(curve(100), target=12)
+    points = curve_payload(curve(100), target=12)
 
     assert points[0]["t"] == 0.0
     assert points[-1]["t"] == 99.0
 
 
 def test_leaves_a_curve_alone_when_it_is_already_short():
-    points = downsample_curve(curve(5), target=12)
+    points = curve_payload(curve(5), target=12)
 
     assert len(points) == 5
 
 
 def test_handles_an_empty_curve():
-    assert downsample_curve([], target=12) == []
+    assert curve_payload([], target=12) == []
 
 
 # --- dispatch -------------------------------------------------------------
