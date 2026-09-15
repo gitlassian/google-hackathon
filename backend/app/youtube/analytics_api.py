@@ -29,6 +29,12 @@ RETENTION_METRICS = (
     "audienceWatchRatio,relativeRetentionPerformance,startedWatching,stoppedWatching"
 )
 
+# YouTube suppresses the drop-off counters below some view threshold, and asking
+# for them takes the entire result down: a 57-view video returns 100 rows for
+# audienceWatchRatio alone and 0 rows with the counters added. The curve is worth
+# more than the hook number, so fall back to this when the full set comes back empty.
+SAFE_RETENTION_METRICS = "audienceWatchRatio,relativeRetentionPerformance"
+
 # Default to the whole history. A rolling lookback silently truncates: on the
 # test channel a two-year window reported 254 views against 9150 lifetime, and
 # returned a retention curve for only 5 of 13 videos instead of all 13, because
@@ -111,16 +117,23 @@ class AnalyticsApiClient:
     def retention(
         self, video_id: str, start: str | None = None, end: str | None = None
     ) -> list[dict[str, Any]]:
-        """100 points, elapsedVideoTimeRatio 0.01..1.00. Works for Shorts."""
-        return self._with_dates(
-            dict(
-                dimensions="elapsedVideoTimeRatio",
-                metrics=RETENTION_METRICS,
-                filters=f"video=={video_id}",
-            ),
-            start,
-            end,
-        )
+        """100 points, elapsedVideoTimeRatio 0.01..1.00. Works for Shorts.
+
+        Costs a second call only on videos too small to report drop-off.
+        """
+        for metrics in (RETENTION_METRICS, SAFE_RETENTION_METRICS):
+            rows = self._with_dates(
+                dict(
+                    dimensions="elapsedVideoTimeRatio",
+                    metrics=metrics,
+                    filters=f"video=={video_id}",
+                ),
+                start,
+                end,
+            )
+            if rows:
+                return rows
+        return []
 
     def timeseries(
         self, video_id: str, start: str | None = None, end: str | None = None
