@@ -19,8 +19,4 @@ node_modules/
 
 # outputs
 backend/out/
-
-# editors
-.idea/
-.vscode/
 .DS_Store
