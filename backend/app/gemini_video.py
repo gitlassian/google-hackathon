@@ -1,5 +1,4 @@
 import base64
-import time
 from google import genai
 
 from .config import GEMINI_MODEL, require_gemini_key
@@ -254,69 +253,6 @@ def analyze_short(
             {
                 "type": "video",
                 "uri": youtube_url,
-            },
-            {
-                "type": "text",
-                "text": SHORT_ANALYSIS_PROMPT,
-            },
-        ],
-        response_format={
-            "type": "text",
-            "mime_type": "application/json",
-            "schema": ShortReport.model_json_schema(
-                by_alias=True
-            ),
-        },
-        generation_config={
-            "temperature": 0.2,
-        },
-    )
-
-    report = ShortReport.model_validate_json(
-        interaction.output_text
-    )
-
-    return report, interaction.id
-
-def upload_video_file(video_path: str):
-    video = _client.files.upload(file=video_path)
-
-    while not video.state or video.state.name == "PROCESSING":
-        time.sleep(2)
-        video = _client.files.get(name=video.name)
-
-    if video.state.name != "ACTIVE":
-        raise RuntimeError(
-            f"Video processing failed with state: {video.state.name}"
-        )
-
-    return video
-
-
-def analyze_short_file(
-    video_path: str,
-    screenshot_bytes: bytes,
-    screenshot_mime_type: str = "image/png",
-) -> tuple[ShortReport, str]:
-    video = upload_video_file(video_path)
-
-    screenshot_b64 = base64.b64encode(
-        screenshot_bytes
-    ).decode("utf-8")
-
-    interaction = _client.interactions.create(
-        model=GEMINI_MODEL,
-        system_instruction=SHORT_ANALYSIS_SYSTEM_PROMPT,
-        input=[
-            {
-                "type": "image",
-                "data": screenshot_b64,
-                "mime_type": screenshot_mime_type,
-            },
-            {
-                "type": "video",
-                "uri": video.uri,
-                "mime_type": video.mime_type,
             },
             {
                 "type": "text",
