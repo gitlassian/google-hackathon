@@ -90,6 +90,23 @@ def test_says_in_the_notes_that_stayed_to_watch_is_our_arithmetic():
     assert "engagedViews" in stats.notes
 
 
+def test_prefers_a_separate_engagement_window_for_stayed_to_watch():
+    # Before 2025 YouTube counted a Shorts view the same way it counted an
+    # engaged view, so engagedViews/views over all history is always 100% and
+    # says nothing. The ratio has to come from a window where it means something.
+    stats = build(engagement={"views": 200, "engagedViews": 100})
+
+    assert stats.stayed_to_watch_pct == 50.0
+    assert stats.swiped_away_pct == 50.0
+    # Everything else still comes from the full-history metrics.
+    assert stats.engaged_views == 165
+    assert stats.watch_time_hours == 2.0
+
+
+def test_falls_back_to_the_main_metrics_when_no_engagement_window_is_given():
+    assert build(engagement=None).stayed_to_watch_pct == 16.5
+
+
 def test_leaves_unique_viewers_null_because_v2_has_no_such_metric():
     assert build().unique_viewers is None
 

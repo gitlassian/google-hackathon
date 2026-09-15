@@ -11,6 +11,7 @@ from .config import YOUTUBE_API_KEY
 from .data_api import DataApiClient
 from .errors import NoDataAvailable, NotAuthenticated
 from .mapping import (
+    ENGAGED_VIEWS_MEANINGFUL_FROM,
     SHORTS,
     derive_stayed_to_watch_pct,
     retention_stats_from_analytics,
@@ -102,16 +103,30 @@ class YouTubeService:
         limit: int = 200,
         with_titles: bool = True,
     ) -> list[VideoPerformance]:
-        rows = self.analytics.top_videos(
-            start, end, SHORTS if shorts_only else None, limit
-        )
+        content_type = SHORTS if shorts_only else None
+        rows = self.analytics.top_videos(start, end, content_type, limit)
+
         metadata: dict[str, VideoMetadata] = {}
         if with_titles and rows:
             metadata = {
                 video.video_id: video
                 for video in self.data.get_videos([row["video"] for row in rows])
             }
-        return [_performance(row, metadata.get(row["video"])) for row in rows]
+
+        # One extra call for the whole list, not one per video.
+        engagement: dict[str, dict[str, Any]] = {}
+        if rows and (not start or start < ENGAGED_VIEWS_MEANINGFUL_FROM):
+            engagement = {
+                row["video"]: row
+                for row in self.analytics.top_videos(
+                    ENGAGED_VIEWS_MEANINGFUL_FROM, end, content_type, limit
+                )
+            }
+
+        return [
+            _performance(row, metadata.get(row["video"]), engagement.get(row["video"]))
+            for row in rows
+        ]
 
     def list_my_shorts(self, **kwargs: Any) -> list[VideoPerformance]:
         return self.list_my_videos(shorts_only=True, **kwargs)
@@ -178,10 +193,30 @@ class YouTubeService:
             rows=rows,
             duration_sec=video.duration_sec if video else None,
             performance=self.analytics.video_performance(video_id, start, end),
+            engagement=self._engagement(video_id, start, end),
         )
 
+    def _engagement(
+        self, video_id: str, start: str | None, end: str | None
+    ) -> dict[str, Any] | None:
+        """views/engagedViews from a window where the ratio actually means something.
 
-def _performance(row: dict[str, Any], video: VideoMetadata | None) -> VideoPerformance:
+        Costs one extra call, and only when the requested window reaches back
+        before YouTube's 2025 change to Shorts view counting.
+        """
+        scoped_start = max(start or "", ENGAGED_VIEWS_MEANINGFUL_FROM)
+        if start and start >= ENGAGED_VIEWS_MEANINGFUL_FROM:
+            return None  # the main query is already inside the meaningful window
+        return self.analytics.video_performance(video_id, scoped_start, end)
+
+
+def _performance(
+    row: dict[str, Any],
+    video: VideoMetadata | None,
+    engagement: dict[str, Any] | None = None,
+) -> VideoPerformance:
+    # engagedViews/views is only meaningful from 2025 on; see mapping.py.
+    ratio_source = engagement or row
     return VideoPerformance(
         video_id=row["video"],
         title=video.title if video else None,
@@ -192,7 +227,7 @@ def _performance(row: dict[str, Any], video: VideoMetadata | None) -> VideoPerfo
         average_view_duration_sec=row.get("averageViewDuration"),
         average_view_percentage=row.get("averageViewPercentage"),
         stayed_to_watch_pct=derive_stayed_to_watch_pct(
-            row.get("views"), row.get("engagedViews")
+            ratio_source.get("views"), ratio_source.get("engagedViews")
         ),
         likes=row.get("likes"),
         comments=row.get("comments"),

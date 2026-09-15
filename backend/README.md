@@ -94,6 +94,15 @@ against a live channel:
 Variant D being empty is why "stayed to watch" is derived from `engagedViews / views` rather
 than from segment counters.
 
+## Checking it still works
+
+```bash
+.venv/Scripts/python youtube_check.py
+```
+
+Walks every facade method against the connected channel and flags any field that
+comes back null, empty or zero. Run it before a demo.
+
 ## Tests
 
 ```bash
@@ -179,11 +188,24 @@ trust this list over <https://developers.google.com/youtube/analytics/dimensions
 - `startedWatching`, `stoppedWatching` and `totalSegmentImpressions` return **no rows**. Studio's
   "Stayed to watch" is not an API metric either; `derive_stayed_to_watch_pct` approximates it as
   `engagedViews / views` and says so in `notes`. Do not present it as YouTube's own figure.
-- **Shorts loop, so watch-time metrics exceed 100%.** A real example from the test channel: a
-  `PT57S` Short reports `averageViewDuration` 90 s, `averageViewPercentage` 159%, and an
-  `audienceWatchRatio` of 2.29 at the first sample. Nothing downstream may treat that as an error.
+- **Queries default to the whole history (`2008-07-01` → today), and should.** A rolling window
+  silently truncates. On the test channel a two-year window reported 254 views against 9150
+  lifetime, and returned a retention curve for **5 of 13** videos instead of all 13 — the other
+  eight simply had their watch time before the window. Pass `start`/`end` to narrow deliberately.
+- **`engagedViews` is meaningless before 2025.** YouTube changed Shorts view counting in early
+  2025; prior to that `engagedViews` equals `views` exactly on every video checked, so
+  `engagedViews / views` is a flat 100%. `stayed_to_watch_pct` is therefore measured from
+  `ENGAGED_VIEWS_MEANINGFUL_FROM` (2025-01-01) regardless of the reported window, and the
+  derivation window is named in `notes`. Ignoring this reports ~99% stayed-to-watch on videos
+  whose real figure is ~40%.
+- **Shorts loop, so watch-time metrics exceed 100%.** A `PT57S` Short reports
+  `averageViewPercentage` 159% and `audienceWatchRatio` 2.29 at the first sample over a narrow
+  window. Nothing downstream may treat that as an error.
+- **Day-level `averageViewDuration` can be nonsense.** One day on the test channel reported 854 s
+  for a 57 s video, and disagreed with `estimatedMinutesWatched / views` on the same row. Use the
+  video-level figure, not the daily one.
 - Per-video `likes` can be **negative** over a date range — it is the net change in that window,
-  not a total.
+  not a total. The channel total came back as -50 while the public like count was 368.
 - Data API quota is 10,000 units/day. `videos.list` / `channels.list` / `playlistItems.list`
   cost 1 unit; `search.list` costs 100 — walk the uploads playlist instead.
 - The Google client is **synchronous**. Routes calling it must be `def`, not `async def`, so

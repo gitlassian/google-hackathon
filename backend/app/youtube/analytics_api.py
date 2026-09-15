@@ -26,12 +26,15 @@ VIDEO_METRICS = (
 # they are left out entirely.
 RETENTION_METRICS = "audienceWatchRatio,relativeRetentionPerformance"
 
-DEFAULT_LOOKBACK_DAYS = 730
+# Default to the whole history. A rolling lookback silently truncates: on the
+# test channel a two-year window reported 254 views against 9150 lifetime, and
+# returned a retention curve for only 5 of 13 videos instead of all 13, because
+# the rest of the watch time predated the window.
+EARLIEST_AVAILABLE_DATE = "2008-07-01"
 
 
 def default_window() -> tuple[str, str]:
-    today = dt.date.today()
-    return str(today - dt.timedelta(days=DEFAULT_LOOKBACK_DAYS)), str(today)
+    return EARLIEST_AVAILABLE_DATE, str(dt.date.today())
 
 
 class AnalyticsApiClient:

@@ -15,9 +15,14 @@ VIDEO_ON_DEMAND = "video_on_demand"
 UNSPECIFIED = "unspecified"
 
 STAYED_TO_WATCH_NOTE = (
-    "stayed_to_watch_pct is derived as engagedViews / views; YouTube Studio's own "
-    "figure is not exposed by the Analytics API."
+    "stayed_to_watch_pct is derived as engagedViews / views over "
+    "{window}; YouTube Studio's own figure is not exposed by the Analytics API."
 )
+
+# YouTube changed how it counts a Shorts view in early 2025. Before that,
+# engagedViews was identical to views on every video we checked, so the ratio is
+# a flat 100% and means nothing. Only measure engagement from here onward.
+ENGAGED_VIEWS_MEANINGFUL_FROM = "2025-01-01"
 
 
 def rows_as_dicts(response: dict[str, Any]) -> list[dict[str, Any]]:
@@ -85,6 +90,7 @@ def retention_stats_from_analytics(
     rows: list[dict[str, Any]],
     duration_sec: float | None,
     performance: dict[str, Any] | None = None,
+    engagement: dict[str, Any] | None = None,
 ) -> RetentionStats:
     """Assemble the same RetentionStats the screenshot path returns, from exact data.
 
@@ -92,20 +98,24 @@ def retention_stats_from_analytics(
     metrics (views, engagedViews, estimatedMinutesWatched, averageViewDuration).
     Keeping the output type identical is what lets the coaching prompt and the
     frontend stay unaware of which source was used.
+
+    `engagement` optionally supplies views/engagedViews from a narrower window
+    just for the stayed-to-watch ratio. See ENGAGED_VIEWS_MEANINGFUL_FROM.
     """
     metrics = performance or {}
-    views = metrics.get("views")
-    engaged_views = metrics.get("engagedViews")
+    engagement_metrics = engagement or metrics
     minutes_watched = metrics.get("estimatedMinutesWatched")
 
-    stayed = derive_stayed_to_watch_pct(views, engaged_views)
+    stayed = derive_stayed_to_watch_pct(
+        engagement_metrics.get("views"), engagement_metrics.get("engagedViews")
+    )
     curve = curve_from_retention_rows(rows, duration_sec)
 
     stats = RetentionStats(
         source="analytics_api",
         video_duration_sec=duration_sec,
         avg_view_duration_sec=metrics.get("averageViewDuration"),
-        engaged_views=engaged_views,
+        engaged_views=metrics.get("engagedViews"),
         watch_time_hours=round(minutes_watched / 60, 2) if minutes_watched else None,
         stayed_to_watch_pct=stayed,
         swiped_away_pct=round(100 - stayed, 1) if stayed is not None else None,
@@ -113,6 +123,14 @@ def retention_stats_from_analytics(
         biggest_drops=compute_biggest_drops(curve),
         # Nothing was read off a chart, so there is nothing to be unsure about.
         reading_confidence=1.0,
-        notes=STAYED_TO_WATCH_NOTE if stayed is not None else "",
+        notes=(
+            STAYED_TO_WATCH_NOTE.format(
+                window=f"{ENGAGED_VIEWS_MEANINGFUL_FROM} onward"
+                if engagement
+                else "the reported window"
+            )
+            if stayed is not None
+            else ""
+        ),
     )
     return normalize_stats(stats)
