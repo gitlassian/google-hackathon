@@ -1,7 +1,16 @@
-.env
+# Python
 .venv/
+venv/
 __pycache__/
-*.pyc
-.youtube-token.json
+*.py[cod]
+.pytest_cache/
+
+# Secrets — never commit these
+.env
 client_secret*.json
+*token*.json
+.youtube-token.json
+
+# Generated output
 out/
+.youtube-cache/
