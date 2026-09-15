@@ -6,5 +6,9 @@ Hackathon web tool: submit a YouTube Short and a Studio retention screenshot, ge
 - UI: [`frontend/`](frontend/) — Next.js, white theme, English
 
 ```bash
-cd frontend && npm install && npm run dev
+cd frontend
+cp .env.example .env.local   # GEMINI_API_KEY
+npm install && npm run dev
 ```
+
+Analyze flow: screenshot (or a future YouTube stats API) → `RetentionStats` schema → Gemini watches the Short with those numbers → report + chat.

@@ -13,6 +13,21 @@ export type Dip = {
   fix: string;
 };
 
+export type StatsSource = "screenshot" | "youtube_api" | "none";
+
+/** Numbers Gemini (or a future YouTube API) must fill in before coaching. */
+export type RetentionStats = {
+  source: StatsSource;
+  durationSec: number;
+  stayedToWatchPct: number | null;
+  avgViewDurationSec: number | null;
+  views: number | null;
+  impressions: number | null;
+  swipeAwayPct: number | null;
+  curve: CurvePoint[];
+  chartNotes: string;
+};
+
 export type Report = {
   score: number;
   verdict: string;
@@ -55,6 +70,9 @@ export type Analysis = {
   screenshotPreview: string | null;
   videoPreview: string | null;
   report: Report | null;
+  stats: RetentionStats | null;
+  interactionId: string | null;
+  error: string | null;
   messages: ChatMessage[];
   loadingStep: number;
 };
