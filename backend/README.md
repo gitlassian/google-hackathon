@@ -103,19 +103,60 @@ than from segment counters.
 No network and no credentials — these cover the pure functions only (URL/ID resolution,
 ISO-8601 durations, retention rows → curve, drop detection, stayed-to-watch derivation).
 
+## Using it from other backend code
+
+```python
+from app.youtube import YouTubeService
+
+yt = YouTubeService()
+if yt.is_connected():
+    for short in yt.list_my_shorts(limit=10):
+        print(short.video_id, short.views, short.stayed_to_watch_pct)
+
+    stats = yt.get_retention_stats("https://www.youtube.com/shorts/VIDEO_ID")
+    stats.source              # "analytics_api"
+    stats.retention_curve     # 100 CurvePoints
+```
+
+Import from `app.youtube` and nothing deeper. Everything raises subclasses of `YouTubeError`.
+
+## Endpoints
+
+| Route | Purpose |
+|---|---|
+| `POST /retention` | **Start here.** Form `url` and/or `screenshot`; picks the best source |
+| `POST /extract-retention` | Screenshot only |
+| `GET /youtube/status` | Is a channel connected, and which |
+| `GET /youtube/auth/start` → `/auth/callback` | Browser OAuth |
+| `GET /youtube/summary` | Channel totals plus a per-content-type breakdown |
+| `GET /youtube/shorts` · `/youtube/videos` | Per-video performance, best first |
+| `GET /youtube/videos/{id}/retention` | `RetentionStats` from the API |
+| `GET /youtube/videos/{id}/stats` · `/timeseries` · `/traffic-sources` · `/metadata` | |
+| `GET /youtube/resolve?url=…` | URL → video ID |
+
+Path parameters take a bare video ID. Pass full URLs via `?url=` or `POST /retention`.
+
 ## Module layout
 
 ```
 app/
-  main.py          FastAPI app
+  main.py          app setup only
+  console.py       UTF-8 stdout for the CLI scripts
   extractor.py     Gemini: screenshot -> RetentionStats
   retention.py     curve maths shared by both sources
   schemas.py       RetentionStats, CurvePoint, Drop
+  routers/
+    retention.py   POST /retention, POST /extract-retention
+    youtube.py     everything under /youtube
   youtube/
+    service.py     YouTubeService — the facade to import
+    analytics_api.py  Analytics v2; every query shape here is verified
+    data_api.py    Data v3 metadata
     auth.py        OAuth: credential stores, CLI flow, web flow
     config.py      YOUTUBE_* settings (never fails at import)
     errors.py      NotAuthenticated, NotChannelOwner, QuotaExceeded, NoDataAvailable
     mapping.py     Analytics rows -> RetentionStats
+    models.py      VideoMetadata, ChannelMetadata, VideoPerformance, ...
     parsing.py     URL/ID resolution, ISO-8601 durations
 ```
 

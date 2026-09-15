@@ -7,14 +7,22 @@ from pathlib import Path
 from google import genai
 from google.genai import types
 
-from .config import GEMINI_API_KEY, GEMINI_MODEL
+from .config import GEMINI_MODEL, require_gemini_key
 from .retention import normalize_stats
 from .schemas import RetentionStats
 
 # The SDK logs an "automatic function calling" warning on every call we make; not relevant here.
 logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 
-_client = genai.Client(api_key=GEMINI_API_KEY)
+_client_cache: genai.Client | None = None
+
+
+def _client() -> genai.Client:
+    """Built on first use so the app boots with only YouTube credentials."""
+    global _client_cache
+    if _client_cache is None:
+        _client_cache = genai.Client(api_key=require_gemini_key())
+    return _client_cache
 
 EXTRACTION_PROMPT = """\
 You are reading a screenshot from YouTube Studio's Analytics > Engagement tab for a YouTube Short.
@@ -57,7 +65,7 @@ def _load_image(path: str | Path) -> tuple[bytes, str]:
 
 def extract_retention_stats(image_bytes: bytes, mime_type: str = "image/png") -> RetentionStats:
     """Send one screenshot to Gemini and get structured retention statistics back."""
-    response = _client.models.generate_content(
+    response = _client().models.generate_content(
         model=GEMINI_MODEL,
         contents=[
             types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
