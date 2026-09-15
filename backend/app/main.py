@@ -13,7 +13,7 @@ from .schemas import (
     YouTubeQuestionResponse,
     RetentionStats,
 )
-from .youtube import (
+from .gemini_video import (
     analyze_short_file,
     ask_follow_up,
     ask_youtube_video,

@@ -279,11 +279,11 @@ def analyze_short(
     return report, interaction.id
 
 def upload_video_file(video_path: str):
-    video = _client.files.upload(file=video_path)
+    video = _client().files.upload(file=video_path)
 
     while not video.state or video.state.name == "PROCESSING":
         time.sleep(2)
-        video = _client.files.get(name=video.name)
+        video = _client().files.get(name=video.name)
 
     if video.state.name != "ACTIVE":
         raise RuntimeError(
@@ -304,7 +304,7 @@ def analyze_short_file(
         screenshot_bytes
     ).decode("utf-8")
 
-    interaction = _client.interactions.create(
+    interaction = _client().interactions.create(
         model=GEMINI_MODEL,
         system_instruction=SHORT_ANALYSIS_SYSTEM_PROMPT,
         input=[

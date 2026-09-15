@@ -268,11 +268,11 @@ def analyze_short(
     return report, interaction.id
 
 def upload_video_file(video_path: str):
-    video = _client.files.upload(file=video_path)
+    video = _client().files.upload(file=video_path)
 
     while not video.state or video.state.name == "PROCESSING":
         time.sleep(2)
-        video = _client.files.get(name=video.name)
+        video = _client().files.get(name=video.name)
 
     if video.state.name != "ACTIVE":
         raise RuntimeError(
