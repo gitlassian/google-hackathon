@@ -8,6 +8,7 @@ from google import genai
 from google.genai import types
 
 from .config import GEMINI_API_KEY, GEMINI_MODEL
+from .retention import normalize_stats
 from .schemas import RetentionStats
 
 # The SDK logs an "automatic function calling" warning on every call we make; not relevant here.
@@ -72,20 +73,9 @@ def extract_retention_stats(image_bytes: bytes, mime_type: str = "image/png") ->
     if not isinstance(parsed, RetentionStats):
         # Fallback: SDK returned raw text (older SDKs) — validate it ourselves.
         parsed = RetentionStats.model_validate_json(response.text)
-    return _normalize(parsed)
-
-
-def _normalize(stats: RetentionStats) -> RetentionStats:
-    """Tidy up what the model returned: sorted curve, drops ordered by size."""
-    stats.retention_curve.sort(key=lambda pt: pt.t)
-    if stats.retention_curve:
-        stats.curve_start_pct = stats.retention_curve[0].pct
-        stats.curve_end_pct = stats.retention_curve[-1].pct
-    for d in stats.biggest_drops:
-        d.drop_pct_points = round(d.from_pct - d.to_pct, 1)
-    stats.biggest_drops.sort(key=lambda d: d.drop_pct_points, reverse=True)
-    stats.biggest_drops = stats.biggest_drops[:5]
-    return stats
+    # `source` is in the schema, so the model may have filled it in; it doesn't get a say.
+    parsed.source = "screenshot"
+    return normalize_stats(parsed)
 
 
 def extract_retention_stats_from_file(path: str | Path) -> RetentionStats:
