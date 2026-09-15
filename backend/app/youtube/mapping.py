@@ -7,7 +7,12 @@ from typing import Any
 from ..retention import compute_biggest_drops, normalize_stats
 from ..schemas import CurvePoint, RetentionStats
 
-UNSPECIFIED = "UNSPECIFIED"
+# creatorContentType values. The reference docs spell these SHORTS /
+# VIDEO_ON_DEMAND, but the live API returns lowercase and rejects the uppercase
+# spelling in a filter with "Invalid value (SHORTS)". Lowercase is authoritative.
+SHORTS = "shorts"
+VIDEO_ON_DEMAND = "video_on_demand"
+UNSPECIFIED = "unspecified"
 
 STAYED_TO_WATCH_NOTE = (
     "stayed_to_watch_pct is derived as engagedViews / views; YouTube Studio's own "
@@ -60,14 +65,19 @@ def derive_stayed_to_watch_pct(
 
 
 def group_by_content_type(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    """Split per-video rows by creatorContentType (SHORTS, VIDEO_ON_DEMAND, ...).
+    """Split rows of a `dimensions=creatorContentType` report by content type.
 
-    creatorContentType is dimension-only — YouTube rejects it as a filter — so the
-    split has to happen here rather than in the query.
+    For *listing* a channel's Shorts, prefer `filters=creatorContentType==shorts`
+    on a `dimensions=video` report — YouTube rejects `video` and
+    `creatorContentType` as dimensions in the same query, so they cannot be
+    labelled row by row.
+
+    Keys come back lowercase, whatever case the caller's data used.
     """
     grouped: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
-        grouped.setdefault(row.get("creatorContentType") or UNSPECIFIED, []).append(row)
+        content_type = (row.get("creatorContentType") or UNSPECIFIED).lower()
+        grouped.setdefault(content_type, []).append(row)
     return grouped
 
 

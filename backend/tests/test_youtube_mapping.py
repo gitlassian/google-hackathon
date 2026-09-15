@@ -1,6 +1,8 @@
 import pytest
 
 from app.youtube.mapping import (
+    SHORTS,
+    UNSPECIFIED,
     curve_from_retention_rows,
     derive_stayed_to_watch_pct,
     group_by_content_type,
@@ -81,18 +83,26 @@ def test_never_reports_more_than_a_hundred_percent_stayed():
 
 def test_splits_videos_by_creator_content_type():
     rows = [
-        {"video": "a", "creatorContentType": "SHORTS"},
-        {"video": "b", "creatorContentType": "VIDEO_ON_DEMAND"},
-        {"video": "c", "creatorContentType": "SHORTS"},
+        {"video": "a", "creatorContentType": "shorts"},
+        {"video": "b", "creatorContentType": "video_on_demand"},
+        {"video": "c", "creatorContentType": "shorts"},
     ]
 
     grouped = group_by_content_type(rows)
 
-    assert [r["video"] for r in grouped["SHORTS"]] == ["a", "c"]
-    assert [r["video"] for r in grouped["VIDEO_ON_DEMAND"]] == ["b"]
+    assert [r["video"] for r in grouped[SHORTS]] == ["a", "c"]
+    assert [r["video"] for r in grouped["video_on_demand"]] == ["b"]
+
+
+def test_accepts_the_uppercase_spelling_the_docs_use():
+    # The reference docs spell these SHORTS / VIDEO_ON_DEMAND, but the live API
+    # returns lowercase and rejects uppercase outright in a filter.
+    grouped = group_by_content_type([{"video": "a", "creatorContentType": "SHORTS"}])
+
+    assert [r["video"] for r in grouped[SHORTS]] == ["a"]
 
 
 def test_treats_a_missing_content_type_as_unspecified():
     grouped = group_by_content_type([{"video": "a"}])
 
-    assert [r["video"] for r in grouped["UNSPECIFIED"]] == ["a"]
+    assert [r["video"] for r in grouped[UNSPECIFIED]] == ["a"]

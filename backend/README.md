@@ -68,11 +68,15 @@ Expect these:
 Credentials land in `backend/.youtube-token.json`. Override any path via `backend/.env`:
 `YOUTUBE_CLIENT_SECRETS_FILE`, `YOUTUBE_TOKEN_FILE`, `YOUTUBE_API_KEY`, `YOUTUBE_OAUTH_REDIRECT_URI`.
 
-## Open question: does Shorts retention exist in the API?
+## Does retention work for Shorts? Yes — verified
 
-Google's docs never say whether the audience retention report returns data for Shorts. Studio
-shows the curve, but that is not evidence about the API, and the rest of the YouTube module
-depends on the answer. Settle it first:
+Google's docs never say whether the audience retention report covers Shorts. It does: 100 rows
+for a Short, same as long-form, with `relativeRetentionPerformance` and `audienceType==ORGANIC`
+both working. That is why the Analytics API is the primary retention source and the screenshot
+is the fallback.
+
+`youtube_probe.py` is what established this, and is kept because it re-checks the query shapes
+against a live channel:
 
 ```bash
 .venv/Scripts/python youtube_probe.py
@@ -80,19 +84,15 @@ depends on the answer. Settle it first:
 .venv/Scripts/python youtube_probe.py --video VIDEO_ID
 ```
 
-It prints your channel, a `SHORTS` / `VIDEO_ON_DEMAND` breakdown, and the row count for four
-escalating retention queries against your top Short **and** a long-form control:
+| Variant | Adds | Result |
+|---|---|---|
+| A | `audienceWatchRatio` only | 100 rows |
+| B | `+ relativeRetentionPerformance` | 100 rows |
+| C | `+ audienceType==ORGANIC` | 100 rows |
+| D | `startedWatching` / `stoppedWatching` / `totalSegmentImpressions` | **empty — not available** |
 
-| Variant | Adds |
-|---|---|
-| A | `audienceWatchRatio` only — the minimum that can work |
-| B | `relativeRetentionPerformance` (suspected to be empty on very short videos) |
-| C | `audienceType==ORGANIC` (the commonly copy-pasted filter) |
-| D | `startedWatching` / `stoppedWatching` / `totalSegmentImpressions` |
-
-**Reading the result:** ~100 rows for the Short under variant A means the API path becomes the
-primary retention source. Empty for the Short but fine for the control means Shorts retention
-is not exposed and the screenshot stays primary.
+Variant D being empty is why "stayed to watch" is derived from `engagedViews / views` rather
+than from segment counters.
 
 ## Tests
 
@@ -121,14 +121,31 @@ app/
 
 ### Notes for whoever builds on this
 
-- `creatorContentType` (`SHORTS`, `VIDEO_ON_DEMAND`, …) is **dimension-only**. YouTube rejects
-  `filters=creatorContentType==SHORTS`; request it as a dimension and split client-side.
+Query shapes, established against a live channel. Several contradict the reference docs, so
+trust this list over <https://developers.google.com/youtube/analytics/dimensions>:
+
+- **`creatorContentType` IS a valid filter**, despite the docs calling it dimension-only. It
+  only accepts **lowercase**: `filters=creatorContentType==shorts` works, `==SHORTS` fails with
+  `Invalid value (SHORTS)`. Returned values are lowercase too.
+- **`video` and `creatorContentType` cannot both be dimensions.** Rejected in either order with
+  "The query is not supported", so rows cannot be labelled with their content type. Filter
+  instead. `group_by_content_type` is only for a `dimensions=creatorContentType` report.
+- **A `dimensions=video` report requires both `sort` and `maxResults`.** Omitting them gives the
+  same unhelpful "query is not supported".
 - `elapsedVideoTimeRatio` runs `0.01 → 1.00`. **There is no `t=0` row.** The curve starts at 1%
   of the video, and `curve_from_retention_rows` deliberately does not fabricate a zero point.
 - The `video` filter on the retention report accepts exactly one ID — one HTTP call per video.
-- Studio's "Stayed to watch" is not an API metric. `derive_stayed_to_watch_pct` approximates it
-  as `engagedViews / views` and records that in `notes`; do not present it as YouTube's own figure.
+- `startedWatching`, `stoppedWatching` and `totalSegmentImpressions` return **no rows**. Studio's
+  "Stayed to watch" is not an API metric either; `derive_stayed_to_watch_pct` approximates it as
+  `engagedViews / views` and says so in `notes`. Do not present it as YouTube's own figure.
+- **Shorts loop, so watch-time metrics exceed 100%.** A real example from the test channel: a
+  `PT57S` Short reports `averageViewDuration` 90 s, `averageViewPercentage` 159%, and an
+  `audienceWatchRatio` of 2.29 at the first sample. Nothing downstream may treat that as an error.
+- Per-video `likes` can be **negative** over a date range — it is the net change in that window,
+  not a total.
 - Data API quota is 10,000 units/day. `videos.list` / `channels.list` / `playlistItems.list`
   cost 1 unit; `search.list` costs 100 — walk the uploads playlist instead.
 - The Google client is **synchronous**. Routes calling it must be `def`, not `async def`, so
   FastAPI runs them in a threadpool.
+- Titles contain emoji and non-Latin scripts. CLI scripts must call `app.console.use_utf8_stdout()`
+  or they crash on the Windows cp1252 console before printing anything.

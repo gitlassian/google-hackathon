@@ -1,15 +1,15 @@
-"""Go/no-go probe: does the YouTube Analytics API return audience retention for Shorts?
+"""Probe the YouTube Analytics API for what it will actually give us.
 
     python youtube_probe.py
     python youtube_probe.py --start 2025-01-01 --end 2026-09-15
-    python youtube_probe.py --video VIDEO_ID       # force one specific video
+    python youtube_probe.py --video VIDEO_ID       # probe one specific video
 
-Google's documentation never states whether the audience retention report covers
-Shorts. YouTube Studio clearly shows the curve, but that is not evidence about the
-API. Everything in app/youtube/ depends on the answer, so settle it before building.
+Originally written to settle one question: does the audience retention report
+return data for Shorts? It does — 100 rows, same as long-form. Kept around
+because it also documents, against a live channel, which query shapes the API
+accepts; several of them contradict the reference documentation.
 
-Run from the backend/ directory. Prints, for a Short and for a long-form control,
-how many rows each of four escalating query variants returns.
+Run from the backend/ directory.
 """
 
 from __future__ import annotations
@@ -21,78 +21,70 @@ import sys
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+from app.console import use_utf8_stdout
 from app.youtube.auth import get_or_create_credentials
+from app.youtube.mapping import SHORTS, VIDEO_ON_DEMAND, rows_as_dicts
 
-# Each variant adds one thing that is a plausible cause of empty rows on a Short.
-# Reading down the results tells us exactly which knob breaks it.
+use_utf8_stdout()
+
+# Verified to work on a live channel.
+VIDEO_METRICS = "views,engagedViews,estimatedMinutesWatched,averageViewDuration,averageViewPercentage"
+
+# Each variant adds one thing that could plausibly make the rows come back empty.
+# Reading down the results shows exactly which knob matters.
 RETENTION_VARIANTS = [
-    (
-        "A  minimal",
-        "audienceWatchRatio",
-        "video=={vid}",
-    ),
-    (
-        "B  + relativeRetentionPerformance",
-        "audienceWatchRatio,relativeRetentionPerformance",
-        "video=={vid}",
-    ),
-    (
-        "C  + audienceType==ORGANIC",
-        "audienceWatchRatio,relativeRetentionPerformance",
-        "video=={vid};audienceType==ORGANIC",
-    ),
-    (
-        "D  segment counters",
-        "audienceWatchRatio,startedWatching,stoppedWatching,totalSegmentImpressions",
-        "video=={vid}",
-    ),
+    ("A  minimal", "audienceWatchRatio", "video=={vid}"),
+    ("B  + relativeRetentionPerformance", "audienceWatchRatio,relativeRetentionPerformance", "video=={vid}"),
+    ("C  + audienceType==ORGANIC", "audienceWatchRatio,relativeRetentionPerformance", "video=={vid};audienceType==ORGANIC"),
+    # Expected to come back empty: these three are not available for this report.
+    ("D  segment counters", "audienceWatchRatio,startedWatching,stoppedWatching,totalSegmentImpressions", "video=={vid}"),
 ]
-
-
-def rows_as_dicts(response: dict) -> list[dict]:
-    """Zip a reports.query response back into dicts keyed by column name."""
-    headers = [h["name"] for h in response.get("columnHeaders", [])]
-    return [dict(zip(headers, row)) for row in response.get("rows", [])]
 
 
 def describe_http_error(exc: HttpError) -> str:
     status = getattr(exc.resp, "status", "?")
     try:
-        detail = exc.error_details
+        message = exc.error_details[0].get("message", "")
     except Exception:
-        detail = None
-    return f"HTTP {status} {detail or exc.reason or ''}".strip()
+        message = exc.reason or ""
+    return f"HTTP {status} {message}".strip()
 
 
-def list_videos_by_content_type(analytics, start: str, end: str) -> list[dict]:
-    """Per-video metrics labelled with creatorContentType.
+def query(analytics, start: str, end: str, **params) -> list[dict] | None:
+    """Run one report. None means YouTube rejected the query shape."""
+    try:
+        response = (
+            analytics.reports()
+            .query(ids="channel==MINE", startDate=start, endDate=end, **params)
+            .execute()
+        )
+    except HttpError as exc:
+        print(f"    rejected: {describe_http_error(exc)}")
+        return None
+    return rows_as_dicts(response)
 
-    creatorContentType is a dimension, never a filter, so SHORTS has to be split
-    out on our side.
+
+def list_videos(analytics, start: str, end: str, content_type: str) -> list[dict]:
+    """Top videos of one content type, best first.
+
+    `video` and `creatorContentType` cannot both be dimensions — YouTube rejects
+    that combination — but creatorContentType *is* a valid filter, despite the
+    documentation calling it dimension-only. It only accepts lowercase values.
+    `sort` and `maxResults` are both mandatory on a per-video report.
     """
-    base = dict(
-        ids="channel==MINE",
-        startDate=start,
-        endDate=end,
-        dimensions="video,creatorContentType",
+    return query(
+        analytics,
+        start,
+        end,
+        dimensions="video",
+        metrics=VIDEO_METRICS,
+        filters=f"creatorContentType=={content_type}",
         sort="-views",
         maxResults=200,
-    )
-    # engagedViews is comparatively new; fall back if it is rejected here.
-    for metrics in (
-        "views,engagedViews,estimatedMinutesWatched,averageViewDuration",
-        "views,estimatedMinutesWatched,averageViewDuration",
-    ):
-        try:
-            response = analytics.reports().query(metrics=metrics, **base).execute()
-            print(f"  video list metrics accepted: {metrics}")
-            return rows_as_dicts(response)
-        except HttpError as exc:
-            print(f"  video list rejected [{metrics}]: {describe_http_error(exc)}")
-    return []
+    ) or []
 
 
-def fetch_titles(youtube, video_ids: list[str]) -> dict[str, dict]:
+def fetch_metadata(youtube, video_ids: list[str]) -> dict[str, dict]:
     """Titles and ISO-8601 durations, 50 IDs per call, 1 quota unit per call."""
     out: dict[str, dict] = {}
     for i in range(0, len(video_ids), 50):
@@ -131,12 +123,10 @@ def probe_retention(analytics, video_id: str, label: str, start: str, end: str) 
             continue
 
         rows = rows_as_dicts(response)
-        verdict = "OK  " if rows else "EMPTY"
-        print(f"  {name:38} {verdict} {len(rows)} rows")
+        print(f"  {name:38} {'OK   ' if rows else 'EMPTY'} {len(rows)} rows")
         if rows:
             print(f"      first: {rows[0]}")
-            if len(rows) > 1:
-                print(f"      last:  {rows[-1]}")
+            print(f"      last:  {rows[-1]}")
 
 
 def main() -> int:
@@ -166,45 +156,27 @@ def main() -> int:
         probe_retention(analytics, args.video, "requested video", args.start, args.end)
         return 0
 
-    print("\n=== videos by creatorContentType")
-    videos = list_videos_by_content_type(analytics, args.start, args.end)
-    if not videos:
-        print("No per-video rows returned. Widen the date range, or the channel has no views yet.")
-        return 1
+    print("\n=== channel totals by content type")
+    for row in query(
+        analytics, args.start, args.end,
+        dimensions="creatorContentType", metrics="views,engagedViews,estimatedMinutesWatched",
+    ) or []:
+        print(f"    {row}")
 
-    by_type: dict[str, list[dict]] = {}
-    for row in videos:
-        by_type.setdefault(row.get("creatorContentType", "UNSPECIFIED"), []).append(row)
-    for content_type, rows in sorted(by_type.items()):
-        total = sum(int(r.get("views", 0)) for r in rows)
-        print(f"    {content_type:18} {len(rows):4} videos, {total:>9} views")
-
-    shorts = by_type.get("SHORTS", [])
-    longform = by_type.get("VIDEO_ON_DEMAND", [])
-    if not shorts:
-        print("\nNo SHORTS rows in this window — the retention question stays unanswered.")
-
-    titles = fetch_titles(youtube, [r["video"] for r in (shorts[:1] + longform[:1])])
-
-    for rows, label in ((shorts, "SHORT"), (longform, "long-form control")):
-        if not rows:
+    for content_type, label in ((SHORTS, "SHORT"), (VIDEO_ON_DEMAND, "long-form control")):
+        print(f"\n=== top videos: {content_type}")
+        videos = list_videos(analytics, args.start, args.end, content_type)
+        if not videos:
+            print(f"    none in this window")
             continue
-        top = rows[0]
-        meta = titles.get(top["video"], {})
-        print(
-            f"\n=== top {label}: {meta.get('title', '?')!r} "
-            f"duration={meta.get('duration', '?')} views={top.get('views')} "
-            f"engagedViews={top.get('engagedViews', 'n/a')} "
-            f"avgViewDuration={top.get('averageViewDuration')}s"
-        )
+        for row in videos[:3]:
+            print(f"    {row}")
+
+        top = videos[0]
+        meta = fetch_metadata(youtube, [top["video"]]).get(top["video"], {})
+        print(f"\n    top {label}: {meta.get('title', '?')!r} duration={meta.get('duration', '?')}")
         probe_retention(analytics, top["video"], label, args.start, args.end)
 
-    print(
-        "\n=== verdict: if variant A returned ~100 rows for the SHORT, the plan holds "
-        "and the screenshot path becomes a fallback. If every variant is EMPTY for the "
-        "SHORT but OK for the control, Shorts retention is not exposed and the "
-        "screenshot stays primary."
-    )
     return 0
 
 

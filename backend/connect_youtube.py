@@ -14,8 +14,11 @@ import sys
 
 from googleapiclient.discovery import build
 
+from app.console import use_utf8_stdout
 from app.youtube.auth import DEFAULT_KEY, FileCredentialStore, load_credentials, run_installed_app_flow
 from app.youtube.errors import NotAuthenticated
+
+use_utf8_stdout()
 
 
 def show_channel(credentials) -> None:
