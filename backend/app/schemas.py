@@ -6,6 +6,10 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator
 class FrontendModel(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
+class AnalyzeShortResponse(BaseModel):
+    interaction_id: str
+    report: ShortReport
+
 
 class ExtractedAnalytics(FrontendModel):
     duration_sec: float = Field(
