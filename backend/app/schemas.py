@@ -11,11 +11,6 @@ class CurvePoint(BaseModel):
 class FrontendModel(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-class AnalyzeShortResponse(BaseModel):
-    interaction_id: str
-    report: ShortReport
-
-
 class ExtractedAnalytics(FrontendModel):
     duration_sec: float = Field(
         alias="durationSec",
@@ -115,6 +110,13 @@ class ShortReport(FrontendModel):
     )
 
 
+# Defined after ShortReport because it references it. Same class, same fields —
+# only the position in the file changed, so the name exists when it is used.
+class AnalyzeShortResponse(BaseModel):
+    interaction_id: str
+    report: ShortReport
+
+
 class YouTubeQuestionRequest(BaseModel):
     url: AnyHttpUrl
     question: str = Field(min_length=1, max_length=2000)
@@ -204,6 +206,14 @@ class RetentionStats(BaseModel):
         description=(
             "The pink 'This video' line sampled at roughly every 1-2 seconds from 0 to the video end. "
             "Empty if no retention chart is visible."
+        ),
+    )
+    viewers_remaining: list[CurvePoint] = Field(
+        default_factory=list,
+        description=(
+            "Share of viewers still watching at a few early timestamps (t in seconds). "
+            "Computed from drop-off counters on the API path; empty on the screenshot path. "
+            "This is NOT YouTube Studio's 'Stayed to watch'."
         ),
     )
     curve_start_pct: Optional[float] = Field(

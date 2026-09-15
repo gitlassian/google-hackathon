@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from ..schemas import RetentionStats
@@ -10,19 +11,23 @@ from .auth import DEFAULT_KEY, CredentialStore, FileCredentialStore, load_creden
 from .config import YOUTUBE_API_KEY
 from .data_api import DataApiClient
 from .errors import NoDataAvailable, NotAuthenticated
-from .mapping import (
-    ENGAGED_VIEWS_MEANINGFUL_FROM,
-    SHORTS,
-    derive_stayed_to_watch_pct,
-    retention_stats_from_analytics,
-)
+from .mapping import SHORTS, retention_stats_from_analytics
 from .models import ChannelMetadata, DayPoint, TrafficSource, VideoMetadata, VideoPerformance
 from .parsing import resolve_video_id
 
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 
-# The engagement lookup must cover the whole channel, never just the page being
-# displayed — see list_my_videos.
-ENGAGEMENT_LOOKUP_LIMIT = 200
+
+def publish_window_start(video: VideoMetadata | None) -> str | None:
+    """The day a video went up, as a startDate.
+
+    Queries default to the whole history, which makes YouTube scan every day back
+    to 2008 for a video uploaded last year. Same 100 rows either way: 27.8s from
+    2008-07-01 against 6.6s from the publish date.
+    """
+    published = getattr(video, "published_at", None) or ""
+    match = _ISO_DATE.match(published)
+    return match.group(0) if match else None
 
 
 def trim_empty_days(points: list[DayPoint]) -> list[DayPoint]:
@@ -52,6 +57,9 @@ class YouTubeService:
         self._credentials = None
         self._data: DataApiClient | None = None
         self._analytics: AnalyticsApiClient | None = None
+        # Metadata is needed by nearly every call (duration, publish date) and
+        # never changes mid-request. One lookup per video, not four.
+        self._video_cache: dict[str, VideoMetadata | None] = {}
 
     # --- connection ------------------------------------------------------
 
@@ -89,7 +97,18 @@ class YouTubeService:
         return resolve_video_id(url_or_id)
 
     def get_video(self, url_or_id: str) -> VideoMetadata | None:
-        return self.data.get_video(self.resolve_video_id(url_or_id))
+        video_id = self.resolve_video_id(url_or_id)
+        if video_id not in self._video_cache:
+            self._video_cache[video_id] = self.data.get_video(video_id)
+        return self._video_cache[video_id]
+
+    def _video_window(
+        self, video_id: str, start: str | None, end: str | None
+    ) -> tuple[str | None, str | None]:
+        """Narrow an open-ended query to the video's own lifetime."""
+        if start:
+            return start, end
+        return publish_window_start(self.get_video(video_id)), end
 
     def get_videos(self, video_ids: list[str]) -> list[VideoMetadata]:
         return self.data.get_videos(video_ids)
@@ -105,20 +124,10 @@ class YouTubeService:
     def get_channel_summary(
         self, start: str | None = None, end: str | None = None
     ) -> dict[str, Any]:
+        # No channel-level stayed-to-watch: measuring it honestly needs the
+        # per-segment drop-off counters, which are per video. engagedViews/views
+        # looks like an answer and is not one.
         summary = dict(self.analytics.channel_summary(start, end))
-        # Same 2025 caveat as everywhere else: engagedViews/views over older data
-        # is a flat 100%. See ENGAGED_VIEWS_MEANINGFUL_FROM.
-        engagement = summary
-        if not start or start < ENGAGED_VIEWS_MEANINGFUL_FROM:
-            engagement = self.analytics.channel_summary(
-                ENGAGED_VIEWS_MEANINGFUL_FROM, end
-            )
-        summary["stayedToWatchPct"] = derive_stayed_to_watch_pct(
-            engagement.get("views"), engagement.get("engagedViews")
-        )
-        summary["stayedToWatchFrom"] = (
-            ENGAGED_VIEWS_MEANINGFUL_FROM if engagement is not summary else start
-        )
         summary["byContentType"] = self.analytics.content_type_breakdown(start, end)
         return summary
 
@@ -140,28 +149,7 @@ class YouTubeService:
                 for video in self.data.get_videos([row["video"] for row in rows])
             }
 
-        # One extra call for the whole list, not one per video. Deliberately not
-        # capped at `limit`: the top N by lifetime views and the top N since 2025
-        # are different sets, and a video missing from this lookup must report no
-        # ratio rather than silently fall back to the misleading lifetime one.
-        scoped = not start or start < ENGAGED_VIEWS_MEANINGFUL_FROM
-        engagement: dict[str, dict[str, Any]] = {}
-        if rows and scoped:
-            engagement = {
-                row["video"]: row
-                for row in self.analytics.top_videos(
-                    ENGAGED_VIEWS_MEANINGFUL_FROM, end, content_type, ENGAGEMENT_LOOKUP_LIMIT
-                )
-            }
-
-        return [
-            _performance(
-                row,
-                metadata.get(row["video"]),
-                engagement.get(row["video"], {}) if scoped else row,
-            )
-            for row in rows
-        ]
+        return [_performance(row, metadata.get(row["video"])) for row in rows]
 
     def list_my_shorts(self, **kwargs: Any) -> list[VideoPerformance]:
         return self.list_my_videos(shorts_only=True, **kwargs)
@@ -170,17 +158,20 @@ class YouTubeService:
         self, url_or_id: str, start: str | None = None, end: str | None = None
     ) -> VideoPerformance | None:
         video_id = self.resolve_video_id(url_or_id)
+        start, end = self._video_window(video_id, start, end)
         row = self.analytics.video_performance(video_id, start, end)
         if not row:
             return None
-        performance = _performance(row, self.data.get_video(video_id))
+        performance = _performance(row, self.get_video(video_id))
         performance.content_type = self.analytics.content_type_of(video_id, start, end)
         return performance
 
     def get_video_timeseries(
         self, url_or_id: str, start: str | None = None, end: str | None = None
     ) -> list[DayPoint]:
-        rows = self.analytics.timeseries(self.resolve_video_id(url_or_id), start, end)
+        video_id = self.resolve_video_id(url_or_id)
+        start, end = self._video_window(video_id, start, end)
+        rows = self.analytics.timeseries(video_id, start, end)
         return trim_empty_days(
             [
                 DayPoint(
@@ -196,9 +187,9 @@ class YouTubeService:
     def get_traffic_sources(
         self, url_or_id: str, start: str | None = None, end: str | None = None
     ) -> list[TrafficSource]:
-        rows = self.analytics.traffic_sources(
-            self.resolve_video_id(url_or_id), start, end
-        )
+        video_id = self.resolve_video_id(url_or_id)
+        start, end = self._video_window(video_id, start, end)
+        rows = self.analytics.traffic_sources(video_id, start, end)
         return [
             TrafficSource(
                 source=row["insightTrafficSourceType"],
@@ -219,43 +210,29 @@ class YouTubeService:
         views, since low-volume retention is suppressed.
         """
         video_id = self.resolve_video_id(url_or_id)
+        video = self.get_video(video_id)
+        start, end = self._video_window(video_id, start, end)
+
         rows = self.analytics.retention(video_id, start, end)
         if not rows:
             raise NoDataAvailable(
                 f"No retention data for {video_id}. The channel may not own it, or the "
                 "video may have too few views for YouTube to report a curve."
             )
-        video = self.data.get_video(video_id)
         return retention_stats_from_analytics(
             rows=rows,
             duration_sec=video.duration_sec if video else None,
             performance=self.analytics.video_performance(video_id, start, end),
-            engagement=self._engagement(video_id, start, end),
         )
 
-    def _engagement(
-        self, video_id: str, start: str | None, end: str | None
-    ) -> dict[str, Any] | None:
-        """views/engagedViews from a window where the ratio actually means something.
 
-        Costs one extra call, and only when the requested window reaches back
-        before YouTube's 2025 change to Shorts view counting.
-        """
-        scoped_start = max(start or "", ENGAGED_VIEWS_MEANINGFUL_FROM)
-        if start and start >= ENGAGED_VIEWS_MEANINGFUL_FROM:
-            return None  # the main query is already inside the meaningful window
-        return self.analytics.video_performance(video_id, scoped_start, end)
+def _performance(row: dict[str, Any], video: VideoMetadata | None) -> VideoPerformance:
+    """Per-video metrics, without a stayed-to-watch figure.
 
-
-def _performance(
-    row: dict[str, Any],
-    video: VideoMetadata | None,
-    ratio_source: dict[str, Any],
-) -> VideoPerformance:
-    """`ratio_source` supplies views/engagedViews for the stayed-to-watch ratio.
-
-    It is a different row from `row` whenever the window reaches before 2025, and
-    an empty dict when the video has no data in the meaningful window at all.
+    Measuring stayed-to-watch honestly needs the per-segment drop-off counters,
+    which cost one retention call per video — too much for a list. Rank by
+    average_view_percentage here, and call get_retention_stats for a real hook
+    number on a specific video.
     """
     return VideoPerformance(
         video_id=row["video"],
@@ -266,9 +243,7 @@ def _performance(
         estimated_minutes_watched=row.get("estimatedMinutesWatched"),
         average_view_duration_sec=row.get("averageViewDuration"),
         average_view_percentage=row.get("averageViewPercentage"),
-        stayed_to_watch_pct=derive_stayed_to_watch_pct(
-            ratio_source.get("views"), ratio_source.get("engagedViews")
-        ),
+        stayed_to_watch_pct=None,
         likes=row.get("likes"),
         comments=row.get("comments"),
         shares=row.get("shares"),

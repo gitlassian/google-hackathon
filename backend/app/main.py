@@ -18,6 +18,7 @@ from .gemini_video import (
     ask_follow_up,
     ask_youtube_video,
 )
+from .routers import channel_chat, retention, youtube
 
 app = FastAPI(title="Shorts Retention Coach API", version="0.1.0")
 
@@ -27,6 +28,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# The endpoints below stay inline. These routers only add what is not already
+# here: /channel/chat, the /youtube/* analytics reads, and POST /retention.
+app.include_router(channel_chat.router)
+app.include_router(retention.router)
+app.include_router(youtube.router)
 
 ALLOWED_TYPES = {"image/png", "image/jpeg", "image/webp"}
 

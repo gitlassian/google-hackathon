@@ -89,10 +89,42 @@ against a live channel:
 | A | `audienceWatchRatio` only | 100 rows |
 | B | `+ relativeRetentionPerformance` | 100 rows |
 | C | `+ audienceType==ORGANIC` | 100 rows |
-| D | `startedWatching` / `stoppedWatching` / `totalSegmentImpressions` | **empty — not available** |
+| D | `startedWatching` / `stoppedWatching` / `totalSegmentImpressions` | 100 rows |
 
-Variant D being empty is why "stayed to watch" is derived from `engagedViews / views` rather
-than from segment counters.
+Variant D looked empty on first run. That was the rolling-window bug, not a missing metric —
+over full history it returns all 100 rows, and those counters are what `stayed_to_watch_pct` is
+computed from.
+
+## Asking Gemini about the channel
+
+`POST /channel/chat` `{"message": "...", "interaction_id": "..."}` — Gemini answers questions
+about the connected channel by calling the YouTube tools itself, rather than being handed a
+fixed payload. Pass the previous answer's `interaction_id` to continue the conversation.
+
+```bash
+curl -s localhost:8000/channel/chat -H 'Content-Type: application/json' \
+  -d '{"message":"Which of my Shorts has the worst hook, and why?"}'
+```
+
+The response carries `tool_calls`, a trace of what it fetched — worth showing in a demo.
+
+Six tools, in `app/youtube_tools.py`: `list_my_shorts`, `get_video_stats`,
+`get_retention_curve`, `get_traffic_sources`, `get_channel_summary`, `resolve_video`. Keep the
+list small; large tool lists measurably hurt selection accuracy.
+
+### Two things that will bite you here
+
+- **A tool result must be a JSON string.** Handing `function_result.result` a raw list gets it
+  silently discarded, and the model then **invents plausible data** rather than saying it
+  received none. Verified live: a list produced a confident answer about videos that do not
+  exist; the identical payload as a string produced the correct answer. `_serialize()` in
+  `app/channel_agent.py` exists solely for this.
+- **Tool failures are returned to the model, not raised.** `run_tool` catches everything and
+  returns `is_error: true`, so "you don't own that video" is something the model can explain
+  instead of a 500 that kills the conversation.
+
+The retention curve is thinned to ~12 points before it reaches the model. Sent raw, 100 points
+cost roughly 2k tokens per call for a shape a dozen conveys.
 
 ## Checking it still works
 
@@ -192,12 +224,27 @@ trust this list over <https://developers.google.com/youtube/analytics/dimensions
   silently truncates. On the test channel a two-year window reported 254 views against 9150
   lifetime, and returned a retention curve for **5 of 13** videos instead of all 13 — the other
   eight simply had their watch time before the window. Pass `start`/`end` to narrow deliberately.
-- **`engagedViews` is meaningless before 2025.** YouTube changed Shorts view counting in early
-  2025; prior to that `engagedViews` equals `views` exactly on every video checked, so
-  `engagedViews / views` is a flat 100%. `stayed_to_watch_pct` is therefore measured from
-  `ENGAGED_VIEWS_MEANINGFUL_FROM` (2025-01-01) regardless of the reported window, and the
-  derivation window is named in `notes`. Ignoring this reports ~99% stayed-to-watch on videos
-  whose real figure is ~40%.
+- **Studio's "Stayed to watch" cannot be reproduced from the API. Do not try again.** Two
+  derivations were built and both were wrong, each after looking convincing on a single video:
+
+  | Derivation | `i-8TOGtJxTc` (Studio 74.4%) | `seIjJBsdCRc` (Studio 48.1%) |
+  |---|---|---|
+  | `engagedViews / views` | 33.3% | — |
+  | viewers remaining at 1.0s | 77.3% ✓ | **94.2%** ✗ |
+
+  It is not a fixed time cutoff: Studio's swipe figure is reached at 1.5s on one of those videos
+  and 6.0s on the other. `stayed_to_watch_pct` and `swiped_away_pct` are therefore **always null**
+  on the API path. Studio's number is real and useful — read it off a screenshot, which is what
+  the Gemini extractor is for.
+- **Use `viewers_remaining` instead.** Share of viewers still there at 1, 3 and 5 seconds, from
+  `startedWatching` / `stoppedWatching`. A plain fact, correctly labelled, never presented as
+  Studio's metric. Absent on low-view videos, where YouTube withholds the counters.
+- **`startedWatching` / `stoppedWatching` return HTTP 500 if requested alone** — pair them with
+  `audienceWatchRatio`. They are also suppressed below some view threshold, and asking for them
+  takes the *whole* result down: a 57-view video returns 100 rows without them and 0 rows with.
+  `AnalyticsApiClient.retention` falls back to `SAFE_RETENTION_METRICS` for exactly this.
+- **The curve itself is exact** and matched Studio's chart on both videos checked (42.47 vs 42%,
+  68.02 vs the plotted endpoint). Trust the curve; distrust any summary number derived from it.
 - **Shorts loop, so watch-time metrics exceed 100%.** A `PT57S` Short reports
   `averageViewPercentage` 159% and `audienceWatchRatio` 2.29 at the first sample over a narrow
   window. Nothing downstream may treat that as an error.
