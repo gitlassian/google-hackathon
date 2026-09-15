@@ -94,6 +94,37 @@ against a live channel:
 Variant D being empty is why "stayed to watch" is derived from `engagedViews / views` rather
 than from segment counters.
 
+## Asking Gemini about the channel
+
+`POST /channel/chat` `{"message": "...", "interaction_id": "..."}` — Gemini answers questions
+about the connected channel by calling the YouTube tools itself, rather than being handed a
+fixed payload. Pass the previous answer's `interaction_id` to continue the conversation.
+
+```bash
+curl -s localhost:8000/channel/chat -H 'Content-Type: application/json' \
+  -d '{"message":"Which of my Shorts has the worst hook, and why?"}'
+```
+
+The response carries `tool_calls`, a trace of what it fetched — worth showing in a demo.
+
+Six tools, in `app/youtube_tools.py`: `list_my_shorts`, `get_video_stats`,
+`get_retention_curve`, `get_traffic_sources`, `get_channel_summary`, `resolve_video`. Keep the
+list small; large tool lists measurably hurt selection accuracy.
+
+### Two things that will bite you here
+
+- **A tool result must be a JSON string.** Handing `function_result.result` a raw list gets it
+  silently discarded, and the model then **invents plausible data** rather than saying it
+  received none. Verified live: a list produced a confident answer about videos that do not
+  exist; the identical payload as a string produced the correct answer. `_serialize()` in
+  `app/channel_agent.py` exists solely for this.
+- **Tool failures are returned to the model, not raised.** `run_tool` catches everything and
+  returns `is_error: true`, so "you don't own that video" is something the model can explain
+  instead of a 500 that kills the conversation.
+
+The retention curve is thinned to ~12 points before it reaches the model. Sent raw, 100 points
+cost roughly 2k tokens per call for a shape a dozen conveys.
+
 ## Checking it still works
 
 ```bash

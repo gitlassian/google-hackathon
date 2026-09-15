@@ -22,10 +22,7 @@ ALLOWED_TYPES = {"image/png", "image/jpeg", "image/webp"}
 MAX_SCREENSHOT_BYTES = 15 * 1024 * 1024
 
 
-@router.post("/extract-retention", response_model=RetentionStats)
-def extract_retention(screenshot: UploadFile = File(...)) -> RetentionStats:
-    """Read a YouTube Studio screenshot with Gemini."""
-    return _from_screenshot(screenshot)
+# No /extract-retention here: main.py defines it inline and that one stays.
 
 
 @router.post("/retention", response_model=RetentionStats)

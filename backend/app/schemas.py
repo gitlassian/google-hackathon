@@ -11,11 +11,6 @@ class CurvePoint(BaseModel):
 class FrontendModel(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-class AnalyzeShortResponse(BaseModel):
-    interaction_id: str
-    report: ShortReport
-
-
 class ExtractedAnalytics(FrontendModel):
     duration_sec: float = Field(
         alias="durationSec",
@@ -113,6 +108,13 @@ class ShortReport(FrontendModel):
             "Only use when the supplied evidence supports a distribution-related observation."
         ),
     )
+
+
+# Defined after ShortReport because it references it. Same class, same fields —
+# only the position in the file changed, so the name exists when it is used.
+class AnalyzeShortResponse(BaseModel):
+    interaction_id: str
+    report: ShortReport
 
 
 class YouTubeQuestionRequest(BaseModel):
