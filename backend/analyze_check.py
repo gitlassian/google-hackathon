@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.youtube import analyze_short
+from app.gemini_video import analyze_short
 
 
 YOUTUBE_URL = "https://www.youtube.com/shorts/zq4yvyfk4Eo"
